@@ -8,7 +8,7 @@ Each agent thread gets its own container:
 - nothing else from your home is visible;
 - the agent can't make Zed read, write or run anything on its behalf.
 
-No Flatpak host escape is needed.
+The host escape feature in Zed is not needed.
 
 | Directory | Contents |
 |---|---|
