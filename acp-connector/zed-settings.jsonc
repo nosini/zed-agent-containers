@@ -1,0 +1,20 @@
+// Merge into ~/.var/app/dev.zed.Zed/config/zed/settings.json ("agent_servers").
+// Runs inside the Flatpak; needs no host escape. The client only relays to
+// the host broker socket named by ACP_CONNECTOR; each socket is bound to one
+// fixed container on the host. Leave "args" as is: the client rejects arguments.
+{
+  "agent_servers": {
+    "Codex (read-only container)": {
+      "type": "custom",
+      "command": "/usr/bin/python3",
+      "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
+      "env": { "ACP_CONNECTOR": "codex" }
+    },
+    "Claude Code (read-only container)": {
+      "type": "custom",
+      "command": "/usr/bin/python3",
+      "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
+      "env": { "ACP_CONNECTOR": "claude" }
+    }
+  }
+}

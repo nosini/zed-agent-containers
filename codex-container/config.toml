@@ -1,0 +1,4 @@
+# This is CONTAINER-ONLY configuration. Podman enforces filesystem isolation.
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+cli_auth_credentials_store = "file"

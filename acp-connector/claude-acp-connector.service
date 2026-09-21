@@ -1,0 +1,20 @@
+[Unit]
+Description=ACP broker: Zed (Flatpak) to Claude Code in per-project containers
+Requires=claude-acp-connector.socket
+After=claude-acp-connector.socket
+# Create the claude-agent-state and shared agent-home volumes (Quadlet) if needed.
+Wants=claude-agent-state-volume.service agent-home-volume.service
+After=claude-agent-state-volume.service agent-home-volume.service
+
+[Service]
+Type=simple
+# Optional: ACP_BROKER_OPTS="--git-config F --ssh-agent-socket S --android-sdk D --instructions F"
+EnvironmentFile=-%h/.config/acp-connector/broker.env
+# Installed outside ~/Git so project files can't change host code.
+# Each Zed connection gets a fresh container: ~/Git read-only, the project
+# Zed started the agent in read-write.
+ExecStart=/usr/bin/python3 -I %h/.local/libexec/acp-connector/acp-broker.py --profile claude --git-root %h/Git $ACP_BROKER_OPTS
+UMask=0077
+Restart=on-failure
+# No NoNewPrivileges: rootless Podman may need setuid newuidmap.
+# No Install section: activated by claude-acp-connector.socket.

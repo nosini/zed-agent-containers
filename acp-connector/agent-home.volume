@@ -1,0 +1,4 @@
+[Volume]
+# Writable /home/node shared by the Codex and Claude containers:
+# toolchains they install and build caches. Not your home directory.
+VolumeName=agent-home

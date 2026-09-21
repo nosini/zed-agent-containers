@@ -1,0 +1,44 @@
+# Official Node 22 bookworm-slim, pinned to the manifest verified during setup.
+FROM docker.io/library/node:22-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+
+USER root
+# Keep this step identical in both agent images so the layer is shared.
+# Build tools for testing/building projects; agents add other toolchains
+# (rustup, uv, Go) to their writable home at runtime.
+# (slim images lack man1, which the OpenJDK package scripts need)
+RUN mkdir -p /usr/share/man/man1 \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates git ripgrep openssh-client curl procps file less \
+      zip unzip xz-utils bzip2 build-essential pkg-config libssl-dev \
+      python3 python3-dev python3-venv python3-pip openjdk-17-jdk-headless \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/agent
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts \
+ && npm cache clean --force
+
+# Pinned adapters first, then toolchains the agents install into their home.
+ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/bin:/home/node/.local/go/bin:/home/node/go/bin:${PATH}" \
+    NPM_CONFIG_PREFIX=/home/node/.local \
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+    HOME=/home/node \
+    CODEX_HOME=/home/node/.codex \
+    CODEX_PATH=/opt/agent/node_modules/.bin/codex \
+    INITIAL_AGENT_MODE=agent-full-access \
+    NO_BROWSER=1 \
+    GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
+
+# Mount targets for the connector's optional gitconfig and SSH agent socket
+# (the root filesystem is read-only at runtime).
+RUN mkdir -p /opt/agent-git \
+ && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock
+RUN mkdir -p /home/node/.codex /workspace \
+ && chown node:node /home/node/.codex
+COPY config.toml /home/node/.codex/config.toml
+RUN chown node:node /home/node/.codex/config.toml
+USER node
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["codex-acp"]
