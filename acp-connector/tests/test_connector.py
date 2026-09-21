@@ -22,13 +22,17 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLIENT = os.path.join(HERE, "..", "acp-client.py")
 HARNESS = os.path.join(HERE, "run_broker.py")
-CODEX_ACP_JS = os.path.expanduser(
-    "~/.var/app/dev.zed.Zed/data/zed/external_agents/registry/npx/codex-acp/"
-    "node_modules/@agentclientprotocol/codex-acp/dist/index.js")
-# The tree installed from claude-container/package-lock.json (npm ci), else Zed's copy.
+CODEX_ACP_JS = next((p for p in (
+    # Inside the codex image, else Zed's copy.
+    "/opt/agent/node_modules/@agentclientprotocol/codex-acp/dist/index.js",
+    os.path.expanduser("~/.var/app/dev.zed.Zed/data/zed/external_agents/registry/npx/codex-acp/"
+                       "node_modules/@agentclientprotocol/codex-acp/dist/index.js")) if os.path.exists(p)), "")
+# The tree installed from claude-container/package-lock.json (npm ci), the
+# claude image's own copy, else Zed's copy.
 CLAUDE_ACP_BIN = next((p for p in (
     os.environ.get("CLAUDE_AGENT_ACP", ""),
     "/tmp/claude-agent-tree/node_modules/.bin/claude-agent-acp",
+    "/opt/agent/node_modules/.bin/claude-agent-acp",
     os.path.expanduser("~/.var/app/dev.zed.Zed/data/zed/external_agents/registry/npx/claude-acp/"
                        "node_modules/.bin/claude-agent-acp")) if p and os.path.exists(p)), None)
 FORBIDDEN_PREFIXES = ("fs/", "terminal/", "mcp/", "elicitation/", "_")
@@ -501,10 +505,6 @@ class RealCodexAcpTest(BrokerTest):
         self.assertIn("removed 1 forwarded MCP server", self.broker_text())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 @unittest.skipUnless(CLAUDE_ACP_BIN and shutil.which("node"), "claude-agent-acp not available")
 class RealClaudeAgentAcpTest(BrokerTest):
     """Interop with the real claude-agent-acp 0.79.0, with throwaway state and a read-only HOME."""
@@ -539,3 +539,7 @@ class RealClaudeAgentAcpTest(BrokerTest):
         self.assertIn("removed 1 forwarded MCP server", log)
         self.assertIn("blocked agent notification '_auth/status_update'", log)
         self.assertEqual(os.listdir(home), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

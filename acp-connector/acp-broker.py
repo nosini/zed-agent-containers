@@ -689,8 +689,10 @@ async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=N
     broker = Broker(launcher, git_root, name)
     extra = {}
     if sys.version_info >= (3, 13):
-        # With socket activation systemd owns the path; asyncio must not unlink it.
-        extra["cleanup_socket"] = owns_path
+        # We unlink the path ourselves below, the same way on every Python.
+        extra["cleanup_socket"] = False
+    # With socket activation systemd owns the path; only manual mode removes it.
+    path = sock.getsockname() if owns_path else None
     if before:
         await before
     server = await asyncio.start_unix_server(broker.handle, sock=sock, limit=MAX_LINE, **extra)
@@ -705,6 +707,11 @@ async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=N
         for t in list(broker.tasks):
             t.cancel()
         await asyncio.gather(*broker.tasks, return_exceptions=True)
+    if path:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
     log("stopped")
 
 

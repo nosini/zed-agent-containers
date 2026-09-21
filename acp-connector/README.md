@@ -171,8 +171,11 @@ Zed entries: see `zed-settings.jsonc` (already added to your settings).
 
 ## Tested guarantees
 
-`python3 -m unittest -v tests/test_connector.py` runs 20 tests. They pass
-inside Zed's Flatpak without Podman or host escape. A fake Zed starts the
+`python3 -m unittest -v tests/test_connector.py` (or
+`python3 tests/test_connector.py -v`) runs 20 tests. They pass inside Zed's
+Flatpak without Podman or host escape, and inside the agent containers
+(Python 3.11). The two real-adapter tests skip when that adapter isn't
+installed; each image has only its own. A fake Zed starts the
 **real client** in a project directory, and it connects over the real
 socket to the broker:
 
