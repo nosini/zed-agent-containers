@@ -43,10 +43,10 @@ PODMAN = ("/usr/bin/podman", "--storage-opt", "overlay.mount_program=/usr/bin/fu
 # from the client; the project path is taken from the connecting process's
 # working directory and validated (see resolve_project).
 PROFILES = {
-    "codex": {"image": "localhost/codex-agent:local", "entry": "codex-acp",
+    "codex": {"image": "localhost/codex-agent:local", "entry": "codex-acp", "label": "Codex",
               "volume": "codex-agent-state", "state": "/home/node/.codex",
               "instructions": "/home/node/.codex/AGENTS.md"},
-    "claude": {"image": "localhost/claude-agent:local", "entry": "claude-agent-acp",
+    "claude": {"image": "localhost/claude-agent:local", "entry": "claude-agent-acp", "label": "Claude",
                "volume": "claude-agent-state", "state": "/home/node/.claude",
                "instructions": "/home/node/.claude/CLAUDE.md"},
 }
@@ -166,10 +166,13 @@ def pick_strings(obj, keys):
 class Policy:
     """Per-connection ACP filter. Returns messages to send in each direction."""
 
-    def __init__(self, project, git_root, tag):
+    def __init__(self, project, git_root, tag, label=None):
         self.project = project      # session cwd must be inside this
         self.git_root = git_root    # locations/diffs shown to Zed must be inside this
         self.tag = tag
+        # Zed shows every custom agent's threads with the same icon, so the
+        # thread titles it displays carry the agent's name instead.
+        self.title_prefix = f"[{label}] " if label else ""
         self.client_pending = {}   # id key -> method, client requests awaiting the agent
         self.agent_pending = set()  # id keys of agent requests forwarded to Zed
 
@@ -301,8 +304,17 @@ class Policy:
         self.agent_pending.add(key)
         return [{"jsonrpc": "2.0", "id": mid, "method": method, "params": params}], []
 
+    def label_title(self, title):
+        if not self.title_prefix or not isinstance(title, str) or title.startswith(self.title_prefix):
+            return title
+        return self.title_prefix + title
+
     def agent_result(self, method, result):
         result = strip_meta(result)
+        if method == "session/list" and isinstance(result, dict) and isinstance(result.get("sessions"), list):
+            for s in result["sessions"]:
+                if isinstance(s, dict) and "title" in s:
+                    s["title"] = self.label_title(s["title"])
         if method != "initialize" or not isinstance(result, dict):
             return result
         caps = result.get("agentCapabilities")
@@ -344,6 +356,8 @@ class Policy:
             return None
         if kind in ("tool_call", "tool_call_update"):
             self.tool_call(update)
+        elif kind == "session_info_update" and "title" in update:
+            update["title"] = self.label_title(update["title"])
         elif "content" in update and not self.content_block_ok(update["content"]):
             self.note(f"dropped {kind} with unsupported content")
             return None
@@ -532,7 +546,7 @@ class Broker:
             pass
 
     async def session(self, reader, writer, tag, project):
-        policy = Policy(project, self.git_root, tag)
+        policy = Policy(project, self.git_root, tag, PROFILES.get(self.name, {}).get("label"))
         argv, cleanup = self.launcher(project, f"{self.name}-agent-{os.getpid()}-{self.counter}")
         log(f"[{tag}] project {project}; agent: {' '.join(argv)}")
         try:

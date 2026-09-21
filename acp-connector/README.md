@@ -119,6 +119,11 @@ Rewrites:
 - **Tool calls and permission prompts:** file locations and diffs are only
   shown if they are inside `~/Git`, and are forwarded normalized. Terminal
   content is never shown.
+- **Thread titles:** Zed shows all custom agents' threads with the same
+  icon, so the broker prefixes titles with the agent's name (`[Claude] …`,
+  `[Codex] …`) in `session_info_update` and `session/list`. Threads that
+  already exist get the prefix the next time their title is updated or
+  listed.
 - **`_meta`** is removed at every depth, in both directions. Every message
   is re-encoded from the parsed object.
 - **Logs** contain method names and decisions only:
@@ -172,7 +177,7 @@ Zed entries: see `zed-settings.jsonc` (already added to your settings).
 ## Tested guarantees
 
 `python3 -m unittest -v tests/test_connector.py` (or
-`python3 tests/test_connector.py -v`) runs 20 tests. They pass inside Zed's
+`python3 tests/test_connector.py -v`) runs 24 tests. They pass inside Zed's
 Flatpak without Podman or host escape, and inside the agent containers
 (Python 3.11). The two real-adapter tests skip when that adapter isn't
 installed; each image has only its own. A fake Zed starts the

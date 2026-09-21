@@ -5,6 +5,7 @@ Needs no Podman and no host escape; the agent is a hostile mock (or, for the
 interop tests, the real codex-acp / claude-agent-acp with throwaway state).
 """
 
+import importlib.util
 import json
 import os
 import queue
@@ -284,6 +285,52 @@ class PolicyTests(BrokerTest):
         self.assertEqual(answers['"p1"']["result"], {"outcome": {"outcome": "selected", "optionId": "allow"}})
         self.assertFalse(os.path.exists(os.path.join(self.root, "pwned.txt")))
         self.assertIn("blocked agent request 'fs/write_text_file'", self.broker_text())
+
+
+class ThreadTitleTests(unittest.TestCase):
+    """Zed shows all custom agents' threads with one icon, so titles get a prefix."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("broker", os.path.join(HERE, "..", "acp-broker.py"))
+        cls.broker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.broker)
+
+    def policy(self, label="Claude"):
+        p = self.broker.Policy("/g/p", "/g", "t", label)
+        p.client_pending[self.broker.id_key(1)] = "session/list"
+        return p
+
+    def info_update(self, p, title):
+        msg = {"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "s", "update": {"sessionUpdate": "session_info_update", "title": title}}}
+        to_client, _ = p.from_agent(msg)
+        return to_client[0]["params"]["update"]["title"]
+
+    def test_session_info_update_is_prefixed_once(self):
+        p = self.policy()
+        self.assertEqual(self.info_update(p, "Fix the build"), "[Claude] Fix the build")
+        self.assertEqual(self.info_update(p, "[Claude] Fix the build"), "[Claude] Fix the build")
+        self.assertIsNone(self.info_update(p, None))
+        self.assertEqual(self.info_update(self.policy("Codex"), "Fix the build"), "[Codex] Fix the build")
+
+    def test_session_list_titles_are_prefixed(self):
+        p = self.policy()
+        result = {"sessions": [{"sessionId": "a", "cwd": "/g/p", "title": "One", "_meta": {"x": 1}},
+                               {"sessionId": "b", "cwd": "/g/p", "title": None},
+                               {"sessionId": "c", "cwd": "/g/p"}, "junk"]}
+        to_client, _ = p.from_agent({"jsonrpc": "2.0", "id": 1, "result": result})
+        self.assertEqual(to_client[0]["result"]["sessions"], [
+            {"sessionId": "a", "cwd": "/g/p", "title": "[Claude] One"},
+            {"sessionId": "b", "cwd": "/g/p", "title": None},
+            {"sessionId": "c", "cwd": "/g/p"}, "junk"])
+
+    def test_no_label_leaves_titles_alone(self):
+        self.assertEqual(self.info_update(self.policy(None), "Fix the build"), "Fix the build")
+
+    def test_production_profiles_have_labels(self):
+        self.assertEqual({k: v["label"] for k, v in self.broker.PROFILES.items()},
+                         {"codex": "Codex", "claude": "Claude"})
 
 
 class LifecycleTests(BrokerTest):
