@@ -39,11 +39,15 @@ acp-connector/tests/host-smoke-test.py codex && acp-connector/tests/host-smoke-t
 ```
 
 To update the agents, run `./update.sh` from a host terminal. It moves the
-pinned npm packages and the Node base image digest to their latest
-releases and rebuilds both images without cache, which also refreshes the
-Debian packages. Nothing updates automatically, so run it now and then,
-and whenever you want a new Claude model: the model list comes from the
-pinned Claude Code version. `./update.sh --check` only compares versions,
+pinned npm packages to their newest releases that are at least 3 days old
+(`--min-age=N` to change that, `0` for the latest), so a compromised
+release has time to be caught before you pin it. It also moves the Node
+base image digest to the latest and rebuilds both images without cache,
+which refreshes the Debian packages; those aren't delayed, since they
+carry security fixes. Nothing updates automatically, so run it now and
+then, and whenever you want a new Claude model: the model list comes from
+the pinned Claude Code version, and it arrives 3 days after its release
+unless you pass `--min-age=0`. `./update.sh --check` only compares versions,
 and `--no-build` only bumps the pins. It commits nothing; review
 `git diff` and commit the new pins.
 
