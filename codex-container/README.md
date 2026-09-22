@@ -1,8 +1,8 @@
 # Codex container for rootless Podman
 
 A locally built image for Codex. The connector in `../acp-connector/`
-starts one container per Zed thread, with `~/Git` read-only and the open
-project read-write. See that README for setup, the ACP policy, tests and
+starts one container per Zed connection, which all Codex threads on a
+project share, with `~/Git` read-only and the open project read-write. See that README for setup, the ACP policy, tests and
 limitations.
 
 ## Image

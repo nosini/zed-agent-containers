@@ -43,15 +43,19 @@ client never sends a path; it can only choose which of the two agents to
 talk to.
 
 Each connection gets a fresh `podman run --rm` container: the fixed image,
-adapter and flags, with only the project path varying.
+adapter and flags, with only the project path varying. Zed runs all of an
+agent's threads on a project over one connection, so those threads share
+one container.
 - **Flags:** read-only root filesystem, tmpfs `/tmp`, `--cap-drop=all`,
   `no-new-privileges`, `keep-id` (files it creates are owned by you), PID
   limit 4096, `--log-driver=none` (ACP traffic isn't copied to container
   logs), and SELinux labels disabled. There are no memory or CPU limits, by
   choice: builds can use the whole machine, as they did when the agents ran
   in Zed.
-- **Lifecycle:** the container is removed when the thread's connection
-  ends. The broker also removes leftovers from a crash when it starts.
+- **Lifecycle:** the container is removed when its connection ends, that
+  is when Zed closes it or the broker restarts. Only then do the threads
+  pick up a rebuilt image. The broker also removes leftovers from a crash
+  when it starts.
 
 ## Building and testing
 
@@ -93,7 +97,9 @@ signed with your key after you approve the request in Bitwarden.
   approval. Pushing would additionally need `known_hosts`, which isn't
   mounted.
 - A container keeps the socket it started with. If Bitwarden restarts,
-  open a new thread to reconnect.
+  restart the broker (`systemctl --user restart claude-acp-connector.service`,
+  or `codex-…`) or Zed to reconnect. A new thread alone reuses the
+  container.
 - To turn forwarding off, remove `--ssh-agent-socket …` from
   `~/.config/acp-connector/broker.env`.
 
@@ -206,7 +212,7 @@ socket to the broker:
   extensions don't reach the agent.
 - **Lifecycle:** disconnect stops the agent. An agent that ignores EOF and
   SIGTERM is killed, and its container removal is triggered. A crash is
-  reported. There are at most 4 sessions per agent. An oversized message
+  reported. There are at most 4 connections per agent. An oversized message
   closes only its own connection. Stale and non-socket paths are handled,
   and sockets are 0600.
 - **Socket activation:** the broker does not unlink the systemd-owned
@@ -229,8 +235,8 @@ socket to the broker:
   `tests/host-smoke-test.py` checks all of these. If reading the client's
   directory fails on your host, connections are refused; they never fall
   back to something broader.
-- **Starting a thread takes about 1–3 s longer,** because each connection
-  starts a container.
+- **An agent's first thread on a project starts about 1–3 s slower,**
+  because each connection starts a container.
 - **The agents can change anything in the open project,** including `.git`
   (hooks, config) and `.zed/settings.json`, which Zed acts on. They can read
   every repo in `~/Git`, including any secrets in them, and the network is

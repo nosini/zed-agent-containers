@@ -1,7 +1,9 @@
 # zed-agent-containers
 
 Run Codex and Claude Code for Zed (Flatpak) in rootless Podman containers.
-Each agent thread gets its own container:
+Each agent gets its own container for the project it's working on (Zed
+runs all of an agent's threads on a project over one connection, so they
+share that container):
 
 - the project it was opened on is read-write;
 - the rest of `~/Git` and the Android SDK are read-only;

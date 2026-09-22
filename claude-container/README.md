@@ -1,8 +1,9 @@
 # Claude Code container for rootless Podman
 
 The Claude Code counterpart of `../codex-container`. The connector in
-`../acp-connector/` starts one container per Zed thread, with `~/Git`
-read-only and the open project read-write. See that README for setup, the
+`../acp-connector/` starts one container per Zed connection, which all
+Claude threads on a project share, with `~/Git` read-only and the open
+project read-write. See that README for setup, the
 ACP policy, tests and limitations.
 
 ## Image
