@@ -27,6 +27,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     HOME=/home/node \
     CLAUDE_CONFIG_DIR=/home/node/.claude \
     DISABLE_AUTOUPDATER=1 \
+    DISABLE_TELEMETRY=1 \
     NO_BROWSER=1 \
     GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
 

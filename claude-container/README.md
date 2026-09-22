@@ -18,6 +18,10 @@ ACP policy, tests and limitations.
 - The auto-updater is off, and the image filesystem is read-only anyway. To
   update, run `../update.sh`. The adapter pins the SDK, and so the CLI,
   exactly, so bumping the adapter updates both.
+- `DISABLE_TELEMETRY=1` turns off Claude Code's usage telemetry (the
+  Datadog log intake). It's set as an image `ENV`, not in `settings.json`,
+  because the state volume keeps whatever `settings.json` it was created
+  with.
 - `settings.json` (container-only) sets `permissions.defaultMode` to
   `bypassPermissions`, matching Codex's `approval_policy = "never"`. Bypass
   is allowed because the container runs as uid 1000, not root. You can
