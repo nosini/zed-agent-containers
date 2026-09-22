@@ -15,8 +15,8 @@ ACP policy, tests and limitations.
   of `@anthropic-ai/claude-agent-sdk` 0.3.274, installed without lifecycle
   scripts.
 - The auto-updater is off, and the image filesystem is read-only anyway. To
-  update, change the version in `package.json`, run
-  `npm install --package-lock-only --ignore-scripts`, and rebuild.
+  update, run `../update.sh`. The adapter pins the SDK, and so the CLI,
+  exactly, so bumping the adapter updates both.
 - `settings.json` (container-only) sets `permissions.defaultMode` to
   `bypassPermissions`, matching Codex's `approval_policy = "never"`. Bypass
   is allowed because the container runs as uid 1000, not root. You can

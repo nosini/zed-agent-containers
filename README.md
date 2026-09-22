@@ -36,6 +36,15 @@ systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.so
 acp-connector/tests/host-smoke-test.py codex && acp-connector/tests/host-smoke-test.py claude
 ```
 
+To update the agents, run `./update.sh` from a host terminal. It moves the
+pinned npm packages and the Node base image digest to their latest
+releases and rebuilds both images without cache, which also refreshes the
+Debian packages. Nothing updates automatically, so run it now and then,
+and whenever you want a new Claude model: the model list comes from the
+pinned Claude Code version. `./update.sh --check` only compares versions,
+and `--no-build` only bumps the pins. It commits nothing; review
+`git diff` and commit the new pins.
+
 `acp-connector/install.sh` copies what runs on the host out of this repository, so
 moving or editing the repo doesn't affect a running setup until you
 reinstall. Tests that need no Podman:
