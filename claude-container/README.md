@@ -10,9 +10,9 @@ ACP policy, tests and limitations.
 - The same pinned Node 22 base, Debian packages (build tools, Python venv,
   OpenJDK 17, OpenSSH client) and `PATH` setup as `codex-container`. The
   package layer is shared between the two images.
-- `@agentclientprotocol/claude-agent-acp` 0.79.0, the version Zed's
-  registry uses. The Claude Code CLI (2.1.274) is the locked native binary
-  of `@anthropic-ai/claude-agent-sdk` 0.3.274, installed without lifecycle
+- `@agentclientprotocol/claude-agent-acp` 0.81.0. The Claude Code CLI
+  (2.1.280) is the locked native binary
+  of `@anthropic-ai/claude-agent-sdk` 0.3.280, installed without lifecycle
   scripts.
 - The auto-updater is off, and the image filesystem is read-only anyway. To
   update, run `../update.sh`. The adapter pins the SDK, and so the CLI,
