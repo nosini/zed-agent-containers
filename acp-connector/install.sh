@@ -2,7 +2,8 @@
 # Install the ACP connectors (Codex and Claude Code). Run from a HOST terminal
 # (not in Zed). Copies (never symlinks) host-side code out of ~/Git.
 # Re-run after changing any of these files. Never overwrites your edits to
-# ~/.config/acp-connector/{gitconfig,broker.env,agent-environment.md}.
+# ~/.config/acp-connector/{gitconfig,broker.env,agent-environment.md}; the
+# last is updated from the repo only while you haven't edited it.
 set -eu
 
 if [ -e /.flatpak-info ]; then
@@ -41,9 +42,21 @@ done
 install -m 644 "$src/agent-home.volume" "$quadlets/"
 
 # Environment notes the agents read (AGENTS.md / CLAUDE.md); yours to edit.
-if [ ! -e "$settings/agent-environment.md" ]; then
+# Replaced by the repo version only while you haven't edited it, that is
+# while it is a version from this repository's git history.
+notes=$settings/agent-environment.md
+if [ ! -e "$notes" ]; then
     install -m 644 "$src/agent-environment.md" "$settings/"
-    echo "Created $settings/agent-environment.md"
+    echo "Created $notes"
+elif ! cmp -s "$src/agent-environment.md" "$notes"; then
+    blob=$(git hash-object "$notes" 2>/dev/null || true)
+    if [ -n "$blob" ] && git -C "$src" log --format= --raw --no-abbrev -- agent-environment.md 2>/dev/null |
+            grep -q " $blob "; then
+        install -m 644 "$src/agent-environment.md" "$settings/"
+        echo "Updated $notes"
+    else
+        echo "Not updating $notes: it has your edits. Compare: diff $notes $src/agent-environment.md"
+    fi
 fi
 
 # Git identity and signing for commits made by the agents, from your host

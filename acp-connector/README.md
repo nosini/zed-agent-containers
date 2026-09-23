@@ -76,6 +76,8 @@ The agents run commands inside their container.
 - **Environment note:** `~/.config/acp-connector/agent-environment.md` is
   mounted read-only as `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, so
   the agents know all this and don't try `sudo apt`. Edit it as you like.
+  `install.sh` replaces it with the repo version only while you haven't
+  edited it, and otherwise tells you to compare the two.
 - **Not possible:** containers inside the container (Podman/Docker).
 - **`/tmp` is in RAM:** large build output belongs in the project or the
   agent home.
