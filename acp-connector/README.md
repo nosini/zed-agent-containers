@@ -94,14 +94,29 @@ forwards it into each container (`SSH_AUTH_SOCK`). Agent commits are then
 signed with your key after you approve the request in Bitwarden.
 - If Bitwarden is closed or locked, signed commits fail with a clear error.
 - The socket also allows SSH login and pushing, each only with your
-  approval. Pushing would additionally need `known_hosts`, which isn't
-  mounted.
+  approval; Bitwarden's prompt shows whether a request is for signing or
+  for login.
 - A container keeps the socket it started with. If Bitwarden restarts,
   restart the broker (`systemctl --user restart claude-acp-connector.service`,
   or `codex-…`) or Zed to reconnect. A new thread alone reuses the
   container.
 - To turn forwarding off, remove `--ssh-agent-socket …` from
   `~/.config/acp-connector/broker.env`.
+
+**Pushing:** remotes can stay on `https://` for fetching, with pushes
+going over SSH through `url.<ssh>.pushInsteadOf` rules.
+- `install.sh` copies those rules from your host git config into the
+  agents' gitconfig, adding only ones that are missing. Plain `insteadOf`
+  rules aren't copied, so fetches never need your approval.
+- It also writes `~/.config/acp-connector/known_hosts` with the host keys
+  of those SSH hosts, taken from your `~/.ssh/known_hosts`. The file is
+  regenerated on every install and mounted read-only; git in the
+  containers uses only it (`GIT_SSH_COMMAND` with
+  `StrictHostKeyChecking=yes`), never the agents' own `~/.ssh/known_hosts`.
+- A host without a key in your `~/.ssh/known_hosts` gets a warning:
+  connect to it once from the host, then rerun `install.sh`.
+- Each push needs your approval in Bitwarden. The environment note tells
+  the agents to push only when asked.
 
 **Git worktrees:** a worktree whose main repository is another folder in
 `~/Git` can't commit from the container, because that folder is read-only.
@@ -199,8 +214,9 @@ socket to the broker:
   - A session in a sibling project is rejected.
 - **Container command:** for both profiles, the exact `podman run` flags
   and mount set are checked: `~/Git` ro, project rw, agent home, state
-  volume, and the optional gitconfig, Android SDK and environment note (all
-  ro) and agent socket. A missing or unknown profile, and a bad SDK or note
+  volume, and the optional gitconfig, Android SDK, environment note and
+  push host keys (all ro, the last with its `GIT_SSH_COMMAND`) and agent
+  socket. A missing or unknown profile, and a bad SDK, note or host-keys
   path, are refused.
 - **Editor callbacks:** a hostile mock agent tries writes, reads of
   `~/.codex/auth.json`, terminals, MCP, elicitation, extensions,

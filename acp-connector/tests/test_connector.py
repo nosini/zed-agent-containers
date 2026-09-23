@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import queue
+import shlex
 import shutil
 import signal
 import socket
@@ -469,6 +470,8 @@ class ActivationTest(BrokerTest):
         os.makedirs(sdk)
         notes = os.path.join(self.tmp, "agent-environment.md")
         open(notes, "w").close()
+        known_hosts = os.path.join(self.tmp, "known_hosts")
+        open(known_hosts, "w").close()
         with socket.socket(socket.AF_UNIX) as s:
             s.bind(agent_sock)
         for profile, image, entry, state, notes_dst in (
@@ -478,11 +481,11 @@ class ActivationTest(BrokerTest):
                 if os.path.exists(self.sock):
                     os.unlink(self.sock)
                 self.start_broker(profile, "--git-config", gitconfig, "--ssh-agent-socket", agent_sock,
-                                  "--android-sdk", sdk, "--instructions", notes)
+                                  "--android-sdk", sdk, "--instructions", notes, "--known-hosts", known_hosts)
                 self.addCleanup(self.stop, self.broker)
                 resp = self.zed().initialize()
                 line = next(l for l in self.broker_text().splitlines() if "agent: /usr/bin/podman" in l)
-                argv = line.split("agent: ", 1)[1].split(" ")
+                argv = shlex.split(line.split("agent: ", 1)[1])
                 self.assertEqual(argv[:6], ["/usr/bin/podman", "--storage-opt",
                                             "overlay.mount_program=/usr/bin/fuse-overlayfs", "run", "--rm",
                                             "--interactive"])
@@ -490,7 +493,9 @@ class ActivationTest(BrokerTest):
                              "--security-opt=no-new-privileges", "--userns=keep-id:uid=1000,gid=1000",
                              "--log-driver=none", f"--label=acp-connector.profile={profile}",
                              f"--workdir={self.root}", f"--env=SSH_AUTH_SOCK=/opt/agent-git/ssh-agent.sock",
-                             "--pids-limit=4096", f"--env=ANDROID_HOME={sdk}"):
+                             "--pids-limit=4096", f"--env=ANDROID_HOME={sdk}",
+                             "--env=GIT_SSH_COMMAND=ssh -o UserKnownHostsFile=/opt/agent-git/known_hosts"
+                             " -o StrictHostKeyChecking=yes"):
                     self.assertIn(flag, argv)
                 mounts = sorted(a for a in argv if a.startswith("--mount="))
                 self.assertEqual(mounts, sorted([
@@ -501,6 +506,7 @@ class ActivationTest(BrokerTest):
                     f"--mount=type=bind,src={self.git},dst={self.git},ro=true",
                     f"--mount=type=bind,src={self.root},dst={self.root}",
                     f"--mount=type=bind,src={gitconfig},dst=/opt/agent-git/gitconfig,ro=true",
+                    f"--mount=type=bind,src={known_hosts},dst=/opt/agent-git/known_hosts,ro=true",
                     f"--mount=type=bind,src={agent_sock},dst=/opt/agent-git/ssh-agent.sock"]))
                 self.assertEqual(argv[-2:], [f"localhost/{image}:local", entry])
                 self.broker.terminate()
@@ -518,7 +524,8 @@ class ActivationTest(BrokerTest):
         for extra in ([], ["--profile", "other"], ["--profile", "/bin/sh"],
                       ["--profile", "codex", "--android-sdk", os.path.join(self.tmp, "missing")],
                       ["--profile", "codex", "--android-sdk", self.git + "/a,b"],
-                      ["--profile", "codex", "--instructions", self.root]):
+                      ["--profile", "codex", "--instructions", self.root],
+                      ["--profile", "codex", "--known-hosts", os.path.join(self.tmp, "missing")]):
             p = subprocess.run([sys.executable, "-I", broker, "--git-root", self.git, "--socket", self.sock,
                                 *extra], capture_output=True, timeout=20)
             self.assertEqual(p.returncode, 2, extra)

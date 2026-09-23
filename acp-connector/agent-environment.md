@@ -24,6 +24,9 @@ directly on the user's machine.
 - You cannot run containers (no Podman/Docker).
 - Git commits are signed through the user's SSH agent, and the user
   approves each signature. Don't push unless asked.
+- Pushing works over SSH for the hosts the user set up: `git push` uses
+  their push rules and a read-only list of host keys, and the user
+  approves each push. Don't add host keys or push rules yourself.
 - The limits above are deliberate. If something is blocked (a read-only
   path, a missing tool, no network route, no container runtime), don't
   look for a workaround: no remounting, no probing for sockets or

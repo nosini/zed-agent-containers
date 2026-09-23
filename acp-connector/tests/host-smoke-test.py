@@ -92,6 +92,7 @@ def main():
         mounts = set(sh(*PODMAN, "inspect", name, "--format", fmt).stdout.split())
         expected = {f"{GIT}:false", f"{project}:true", f"{state}:true", "/home/node:true"}
         optional = {"/opt/agent-git/gitconfig:false", "/opt/agent-git/ssh-agent.sock:true",
+                    "/opt/agent-git/known_hosts:false",
                     f"{HOME}/Android/Sdk:false", f"{state}/{'AGENTS.md' if agent == 'codex' else 'CLAUDE.md'}:false"}
         extra = mounts - expected - optional
         check("mounts: ~/Git ro, project rw, agent home, state (+ optional ro extras)",
@@ -110,6 +111,12 @@ def main():
         check("git identity configured", bool(ident), "no user.name; see ~/.config/acp-connector/gitconfig")
         agent_sock = inside('test -S "$SSH_AUTH_SOCK" && echo yes').stdout.strip()
         print(f"info SSH agent for signing: {'available' if agent_sock == 'yes' else 'not forwarded'}")
+        if "/opt/agent-git/known_hosts:false" in mounts:
+            push = inside('case "$GIT_SSH_COMMAND" in *UserKnownHostsFile=/opt/agent-git/known_hosts*) '
+                          'grep -c . /opt/agent-git/known_hosts || true;; *) exit 1;; esac')
+            check("git's SSH uses the read-only host keys", push.returncode == 0, "GIT_SSH_COMMAND not set")
+            push_urls = inside(f"git -C '{project}' config --get-regexp 'url\\..*\\.pushinsteadof'").stdout.split()
+            print(f"info push host keys: {push.stdout.strip() or 0}; push rules: {push_urls[1::2] or 'none'}")
     c.close()
 
     refused = Client(agent, GIT).rpc("initialize", {"protocolVersion": 1})

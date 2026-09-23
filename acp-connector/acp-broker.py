@@ -32,6 +32,7 @@ import asyncio
 import json
 import os
 import posixpath
+import shlex
 import signal
 import socket
 import stat
@@ -56,6 +57,10 @@ HOME_DIR = "/home/node"
 # Mount targets pre-created in the images (their root filesystem is read-only).
 GIT_CONFIG_TARGET = "/opt/agent-git/gitconfig"   # GIT_CONFIG_GLOBAL in the images
 SSH_AGENT_TARGET = "/opt/agent-git/ssh-agent.sock"
+KNOWN_HOSTS_TARGET = "/opt/agent-git/known_hosts"
+# Git's SSH (pushes) trusts only the host keys from the host, never the
+# agent-writable ~/.ssh/known_hosts, and never adds keys on first use.
+GIT_SSH_COMMAND = f"ssh -o UserKnownHostsFile={KNOWN_HOSTS_TARGET} -o StrictHostKeyChecking=yes"
 
 MAX_LINE = 64 * 1024 * 1024
 MAX_PENDING = 256
@@ -444,7 +449,7 @@ def resolve_project(pid, git_root):
 
 
 def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None,
-                android_sdk=None, instructions=None):
+                android_sdk=None, instructions=None, known_hosts=None):
     """The one command a connection may run: a fresh container with ~/Git
     read-only, the connection's project read-write, the shared agent home
     and the profile's state. Optional host resources are mounted read-only,
@@ -470,15 +475,20 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
                  f"--env=ANDROID_HOME={android_sdk}", f"--env=ANDROID_SDK_ROOT={android_sdk}"]
     if instructions:
         argv.append(f"--mount=type=bind,src={instructions},dst={p['instructions']},ro=true")
+    if known_hosts:
+        argv += [f"--mount=type=bind,src={known_hosts},dst={KNOWN_HOSTS_TARGET},ro=true",
+                 f"--env=GIT_SSH_COMMAND={GIT_SSH_COMMAND}"]
     return argv + [p["image"], p["entry"]]
 
 
-def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None):
+def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
+                    known_hosts=None):
     def launch(project, name):
         agent = ssh_agent if ssh_agent and os.path.exists(ssh_agent) else None
         if ssh_agent and not agent:
             log(f"SSH agent socket {ssh_agent} missing; starting without commit signing")
-        return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions),
+        return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
+                            known_hosts),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
 
@@ -548,7 +558,7 @@ class Broker:
     async def session(self, reader, writer, tag, project):
         policy = Policy(project, self.git_root, tag, PROFILES.get(self.name, {}).get("label"))
         argv, cleanup = self.launcher(project, f"{self.name}-agent-{os.getpid()}-{self.counter}")
-        log(f"[{tag}] project {project}; agent: {' '.join(argv)}")
+        log(f"[{tag}] project {project}; agent: {shlex.join(argv)}")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv, stdin=asyncio.subprocess.PIPE,
@@ -739,17 +749,19 @@ def main():
     ap.add_argument("--ssh-agent-socket", help="SSH agent socket forwarded for commit signing")
     ap.add_argument("--android-sdk", help="Android SDK directory, mounted read-only at the same path")
     ap.add_argument("--instructions", help="environment notes for the agents (AGENTS.md/CLAUDE.md), read-only")
+    ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
     ap.add_argument("--socket", help="listen here instead of using systemd socket activation")
     args = ap.parse_args()
     git_root = os.path.realpath(args.git_root)
     for opt, path in (("--git-root", git_root), ("--git-config", args.git_config),
                       ("--ssh-agent-socket", args.ssh_agent_socket), ("--android-sdk", args.android_sdk),
-                      ("--instructions", args.instructions)):
+                      ("--instructions", args.instructions), ("--known-hosts", args.known_hosts)):
         if path is not None and not mount_safe(path):
             ap.error(f"{opt} must be an absolute, normalized path without ',' or '='")
     if not os.path.isdir(git_root):
         ap.error("--git-root must be an existing directory")
-    for opt, path in (("--git-config", args.git_config), ("--instructions", args.instructions)):
+    for opt, path in (("--git-config", args.git_config), ("--instructions", args.instructions),
+                      ("--known-hosts", args.known_hosts)):
         if path and not os.path.isfile(path):
             ap.error(f"{opt} must be an existing file")
     if args.android_sdk and not os.path.isdir(args.android_sdk):
@@ -761,7 +773,7 @@ def main():
             ap.error("no socket-activation fd; use the systemd socket unit or pass --socket")
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
-                               args.android_sdk, args.instructions)
+                               args.android_sdk, args.instructions, args.known_hosts)
     asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile)))
 
 
