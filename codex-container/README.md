@@ -8,7 +8,7 @@ limitations.
 ## Image
 
 - Official `docker.io/library/node:22-bookworm-slim`, pinned by manifest digest.
-- `@openai/codex` 0.155.1 and `@agentclientprotocol/codex-acp` 1.12.0,
+- `@openai/codex` 0.157.1 and `@agentclientprotocol/codex-acp` 1.13.1,
   with dependencies and integrity hashes in `package-lock.json`. npm
   lifecycle scripts are disabled during installation.
 - Debian packages: Git, OpenSSH client (for SSH commit signing), ripgrep,

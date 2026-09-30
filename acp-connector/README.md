@@ -265,7 +265,7 @@ socket to the broker:
 - **Socket activation:** the broker does not unlink the systemd-owned
   socket path.
 - **Real adapters, offline, throwaway state:** codex-acp 1.12.0 and
-  claude-agent-acp 0.79.0 both complete the handshake through the policy.
+  claude-agent-acp 0.81.2 both complete the handshake through the policy.
 - **Mutation checks:** disabling the git-root check, the path-character
   check, the read-only flag on `~/Git`, or the session-directory check each
   makes the suite fail.

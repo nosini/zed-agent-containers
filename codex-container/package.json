@@ -3,10 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@agentclientprotocol/codex-acp": "1.12.0",
-    "@openai/codex": "0.155.1"
+    "@agentclientprotocol/codex-acp": "1.13.1",
+    "@openai/codex": "0.157.1"
   },
   "overrides": {
-    "@openai/codex": "0.155.1"
+    "@openai/codex": "0.157.1"
   }
 }
