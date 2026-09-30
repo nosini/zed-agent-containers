@@ -12,6 +12,7 @@ Zed, that agent gets:
 | the rest of your home (`~/.ssh`, `~/.config`, …), D-Bus, Podman socket | none |
 | its own state volume (login, settings, history) | read-write |
 | the container's home `/home/node` (shared `agent-home` volume) | read-write, persistent |
+| shared memory `~/memory` (`~/.local/share/agent-memory/notes`) | read-write, all agents and projects |
 | editor callbacks (make Zed read/write files, run terminals) | blocked |
 | network | open |
 
@@ -83,6 +84,34 @@ The agents run commands inside their container.
   agent home.
 - **Reset the agents' environment:** `podman volume rm agent-home`. It's
   recreated empty from the image; logins stay in the state volumes.
+
+## Shared memory
+
+`install.sh` creates `~/.local/share/agent-memory`, a git repository on the
+host, and mounts its `notes/` folder read-write at `~/memory` in every
+container, for both agents and all projects. The environment note tells
+the agents to read `~/memory/INDEX.md` when a thread starts, open the notes
+it lists when they're relevant, and save what matters beyond one project:
+your preferences and corrections, machine setup, gotchas. Task state stays
+in the project. This makes a new thread cheap to start, instead of resuming
+a long one whose context has dropped out of the prompt cache.
+
+- **Review on the host:** the agents never commit; their changes show up
+  as uncommitted work. `git -C ~/.local/share/agent-memory add -A`, then
+  `diff --cached`, then commit, or `restore` what you don't want.
+- **Only `notes/` is mounted,** so `.git` (hooks, config) stays out of the
+  agents' reach, and running git on the repo from the host is safe.
+- **Obsidian:** open `~/.local/share/agent-memory` (not `notes/`) as the
+  vault, so `.obsidian/`, which can hold plugins that run on the host, is
+  out of the agents' reach too. It's in `.gitignore`.
+- **Moving it:** change `--memory` in `~/.config/acp-connector/broker.env`
+  to another directory. Keep `.git` out of the mounted folder. `install.sh`
+  leaves an existing `--memory` alone. Remove the option to turn the shared
+  memory off.
+- **It links all projects.** An agent misled by a malicious file in one
+  project can write notes that every other agent then reads. The note
+  tells them notes are information, not instructions, and reviewing the
+  diff before committing is how you catch it.
 
 ## Git inside the containers
 
@@ -217,9 +246,9 @@ socket to the broker:
 - **Container command:** for both profiles, the exact `podman run` flags
   and mount set are checked: `~/Git` ro, project rw, agent home, state
   volume, and the optional gitconfig, Android SDK, environment note and
-  push host keys (all ro, the last with its `GIT_SSH_COMMAND`) and agent
-  socket. A missing or unknown profile, and a bad SDK, note or host-keys
-  path, are refused.
+  push host keys (all ro, the last with its `GIT_SSH_COMMAND`), agent
+  socket and shared memory. A missing or unknown profile, and a bad SDK,
+  note, host-keys or memory path, are refused.
 - **Editor callbacks:** a hostile mock agent tries writes, reads of
   `~/.codex/auth.json`, terminals, MCP, elicitation, extensions,
   `terminal-auth` login, forged, duplicate-key and malformed messages. None

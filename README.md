@@ -8,6 +8,9 @@ share that container):
 - the project it was opened on is read-write;
 - the rest of `~/Git` and the Android SDK are read-only;
 - nothing else from your home is visible;
+- a shared notes folder is read-write for both agents in every project,
+  so they can keep memory across threads; it's a git repository on the
+  host for you to review;
 - the agent can't make Zed read, write or run anything on its behalf.
 
 The host escape feature in Zed is not needed.

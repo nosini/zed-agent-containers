@@ -150,6 +150,21 @@ add_opt() {
 }
 add_opt --instructions "$settings/agent-environment.md"
 add_opt --known-hosts "$settings/known_hosts"
+# Memory shared by all agents. Only notes/ is mounted (read-write, at
+# ~/memory); the git repository around it stays on the host, so the agents
+# can't change its hooks or config. Skipped once broker.env has --memory, so
+# you can point that elsewhere.
+if ! grep -q -- "--memory " "$settings/broker.env"; then
+    memory=${XDG_DATA_HOME:-$HOME/.local/share}/agent-memory
+    if [ ! -e "$memory" ]; then
+        install -d -m 700 "$memory" "$memory/notes"
+        git init -q "$memory"
+        printf '.obsidian/\n' > "$memory/.gitignore"
+        printf '# Shared memory\n\n' > "$memory/notes/INDEX.md"
+        echo "Created $memory (git repository; the agents see only notes/)"
+    fi
+    add_opt --memory "$memory/notes"
+fi
 if [ -d "$HOME/Android/Sdk" ]; then add_opt --android-sdk "$HOME/Android/Sdk"; fi
 echo "Broker options: $(cat "$settings/broker.env")"
 

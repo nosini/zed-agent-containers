@@ -92,7 +92,7 @@ def main():
         mounts = set(sh(*PODMAN, "inspect", name, "--format", fmt).stdout.split())
         expected = {f"{GIT}:false", f"{project}:true", f"{state}:true", "/home/node:true"}
         optional = {"/opt/agent-git/gitconfig:false", "/opt/agent-git/ssh-agent.sock:true",
-                    "/opt/agent-git/known_hosts:false",
+                    "/opt/agent-git/known_hosts:false", "/home/node/memory:true",
                     f"{HOME}/Android/Sdk:false", f"{state}/{'AGENTS.md' if agent == 'codex' else 'CLAUDE.md'}:false"}
         extra = mounts - expected - optional
         check("mounts: ~/Git ro, project rw, agent home, state (+ optional ro extras)",
@@ -104,6 +104,10 @@ def main():
         check("project is writable", inside(f"touch '{probe}' && rm '{probe}'").returncode == 0)
         check("rest of ~/Git is read-only", inside(f"touch '{GIT}/.acp-ro-probe'").returncode != 0)
         check("agent home is writable", inside("touch ~/.acp-probe && rm ~/.acp-probe").returncode == 0)
+        if "/home/node/memory:true" in mounts:
+            check("shared memory is writable, its git repository not visible",
+                  inside("touch ~/memory/.acp-probe && rm ~/memory/.acp-probe && ! test -e ~/memory/.git")
+                  .returncode == 0)
         tools = inside("gcc --version && java -version && python3 -m venv --help && npm --version")
         check("build tools present (gcc, java, venv, npm)", tools.returncode == 0, tools.stderr[-200:])
         check("host home not visible", inside(f"! ls -d {HOME}/.ssh {HOME}/.config /run/user/*/bus 2>/dev/null").returncode == 0)

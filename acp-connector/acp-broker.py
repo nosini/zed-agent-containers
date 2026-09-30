@@ -58,6 +58,9 @@ HOME_DIR = "/home/node"
 GIT_CONFIG_TARGET = "/opt/agent-git/gitconfig"   # GIT_CONFIG_GLOBAL in the images
 SSH_AGENT_TARGET = "/opt/agent-git/ssh-agent.sock"
 KNOWN_HOSTS_TARGET = "/opt/agent-git/known_hosts"
+# Notes shared by all agents across projects (read-write). The git repository
+# around it stays on the host, so the agents can't touch its hooks or config.
+MEMORY_TARGET = "/home/node/memory"
 # Git's SSH (pushes) trusts only the host keys from the host, never the
 # agent-writable ~/.ssh/known_hosts, and never adds keys on first use.
 GIT_SSH_COMMAND = f"ssh -o UserKnownHostsFile={KNOWN_HOSTS_TARGET} -o StrictHostKeyChecking=yes"
@@ -449,11 +452,11 @@ def resolve_project(pid, git_root):
 
 
 def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None,
-                android_sdk=None, instructions=None, known_hosts=None):
+                android_sdk=None, instructions=None, known_hosts=None, memory=None):
     """The one command a connection may run: a fresh container with ~/Git
     read-only, the connection's project read-write, the shared agent home
     and the profile's state. Optional host resources are mounted read-only,
-    except the SSH agent socket."""
+    except the SSH agent socket and the shared memory."""
     p = PROFILES[profile]
     argv = [*PODMAN, "run", "--rm", "--interactive", "--detach-keys=", f"--name={name}",
             f"--label=acp-connector.profile={profile}", "--pull=never", "--log-driver=none",
@@ -478,17 +481,19 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
     if known_hosts:
         argv += [f"--mount=type=bind,src={known_hosts},dst={KNOWN_HOSTS_TARGET},ro=true",
                  f"--env=GIT_SSH_COMMAND={GIT_SSH_COMMAND}"]
+    if memory:
+        argv.append(f"--mount=type=bind,src={memory},dst={MEMORY_TARGET}")
     return argv + [p["image"], p["entry"]]
 
 
 def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
-                    known_hosts=None):
+                    known_hosts=None, memory=None):
     def launch(project, name):
         agent = ssh_agent if ssh_agent and os.path.exists(ssh_agent) else None
         if ssh_agent and not agent:
             log(f"SSH agent socket {ssh_agent} missing; starting without commit signing")
         return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
-                            known_hosts),
+                            known_hosts, memory),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
 
@@ -750,12 +755,14 @@ def main():
     ap.add_argument("--android-sdk", help="Android SDK directory, mounted read-only at the same path")
     ap.add_argument("--instructions", help="environment notes for the agents (AGENTS.md/CLAUDE.md), read-only")
     ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
+    ap.add_argument("--memory", help="notes directory shared by all agents, mounted read-write at ~/memory")
     ap.add_argument("--socket", help="listen here instead of using systemd socket activation")
     args = ap.parse_args()
     git_root = os.path.realpath(args.git_root)
     for opt, path in (("--git-root", git_root), ("--git-config", args.git_config),
                       ("--ssh-agent-socket", args.ssh_agent_socket), ("--android-sdk", args.android_sdk),
-                      ("--instructions", args.instructions), ("--known-hosts", args.known_hosts)):
+                      ("--instructions", args.instructions), ("--known-hosts", args.known_hosts),
+                      ("--memory", args.memory)):
         if path is not None and not mount_safe(path):
             ap.error(f"{opt} must be an absolute, normalized path without ',' or '='")
     if not os.path.isdir(git_root):
@@ -764,8 +771,9 @@ def main():
                       ("--known-hosts", args.known_hosts)):
         if path and not os.path.isfile(path):
             ap.error(f"{opt} must be an existing file")
-    if args.android_sdk and not os.path.isdir(args.android_sdk):
-        ap.error("--android-sdk must be an existing directory")
+    for opt, path in (("--android-sdk", args.android_sdk), ("--memory", args.memory)):
+        if path and not os.path.isdir(path):
+            ap.error(f"{opt} must be an existing directory")
     sock = activated_socket()
     owns_path = sock is None
     if owns_path:
@@ -773,7 +781,7 @@ def main():
             ap.error("no socket-activation fd; use the systemd socket unit or pass --socket")
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
-                               args.android_sdk, args.instructions, args.known_hosts)
+                               args.android_sdk, args.instructions, args.known_hosts, args.memory)
     asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile)))
 
 
