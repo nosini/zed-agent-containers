@@ -92,8 +92,10 @@ host, and mounts its `notes/` folder read-write at `~/memory` in every
 container, for both agents and all projects. The environment note tells
 the agents to read `~/memory/INDEX.md` when a thread starts, open the notes
 it lists when they're relevant, and save what matters beyond one project:
-your preferences and corrections, machine setup, gotchas. Task state stays
-in the project. This makes a new thread cheap to start, instead of resuming
+your preferences and corrections, machine setup, gotchas. They check for
+that before finishing a task or committing. Task state stays in the
+project, and anything that would help in another repo goes to the shared
+memory rather than Claude's per-project memory. This makes a new thread cheap to start, instead of resuming
 a long one whose context has dropped out of the prompt cache.
 
 - **Review on the host:** the agents never commit; their changes show up

@@ -37,10 +37,15 @@ directly on the user's machine.
   and Codex) sees in every project; the user reviews it on the host. At
   the start of a thread, read `~/memory/INDEX.md` and open the notes it
   lists when they're relevant.
-  - Save what will matter in other projects: the user's preferences and
-    corrections, how their machine and tools are set up, gotchas you ran
-    into. Task state and project details belong in the project (or your
-    own per-project memory, if you have one). Never store secrets.
+  - What goes there: anything that would help in another repo, even when
+    you found it while working on this one. That covers the user's
+    preferences and corrections, and how their machine, host setup and
+    tools behave (e.g. the host's PipeWire, WirePlumber or desktop, since
+    that affects every project). If you also have a per-project memory,
+    keep it for things tied to this repo; task state belongs in the
+    project. Never store secrets.
+  - When: before you finish a task or make a commit, check whether you
+    learned something like that, and if so write it to `~/memory`.
   - One topic per file with a descriptive name. Update a note rather than
     adding a near-duplicate, and delete notes that turn out wrong. Keep
     `INDEX.md` to one line per note (`- [Title](file.md) — hook`), since
