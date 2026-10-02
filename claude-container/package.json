@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.81.2"
+    "@agentclientprotocol/claude-agent-acp": "0.81.2",
+    "zcode-app-cli": "3.14.4-29"
   }
 }

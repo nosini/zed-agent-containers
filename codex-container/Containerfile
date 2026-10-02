@@ -27,6 +27,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     CODEX_HOME=/home/node/.codex \
     CODEX_PATH=/opt/agent/node_modules/.bin/codex \
     INITIAL_AGENT_MODE=agent-full-access \
+    ZCODE_DISABLE_UPDATE_CHECK=1 \
     NO_BROWSER=1 \
     GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
 
@@ -35,8 +36,8 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
 # (the root filesystem is read-only at runtime).
 RUN mkdir -p /opt/agent-git \
  && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock /opt/agent-git/known_hosts
-RUN mkdir -p /home/node/.codex /workspace \
- && chown node:node /home/node/.codex
+RUN mkdir -p /home/node/.codex /home/node/.zcode /workspace \
+ && chown node:node /home/node/.codex /home/node/.zcode
 COPY config.toml /home/node/.codex/config.toml
 RUN chown node:node /home/node/.codex/config.toml
 USER node

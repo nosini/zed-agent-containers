@@ -15,6 +15,12 @@
       "command": "/usr/bin/python3",
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
       "env": { "ACP_CONNECTOR": "claude" }
+    },
+    "ZCode (read-only container)": {
+      "type": "custom",
+      "command": "/usr/bin/python3",
+      "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
+      "env": { "ACP_CONNECTOR": "zcode" }
     }
   }
 }

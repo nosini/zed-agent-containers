@@ -1,6 +1,7 @@
 # Zed (Flatpak) ↔ per-project agent containers: ACP connector
 
-Codex (`../codex-container`) and Claude Code (`../claude-container`) run in
+Codex (`../codex-container`), Claude Code (`../claude-container`) and ZCode
+(`../zcode-container`) run in
 rootless Podman containers. When you open an agent thread on a project in
 Zed, that agent gets:
 
@@ -11,6 +12,7 @@ Zed, that agent gets:
 | `~/Android/Sdk` | read-only |
 | the rest of your home (`~/.ssh`, `~/.config`, …), D-Bus, Podman socket | none |
 | its own state volume (login, settings, history) | read-write |
+| ZCode state volume (`~/.zcode`, shared with Codex and Claude for GLM tasks) | read-write |
 | the container's home `/home/node` (shared `agent-home` volume) | read-write, persistent |
 | shared memory `~/memory` (`~/.local/share/agent-memory/notes`) | read-write, all agents and projects |
 | editor callbacks (make Zed read/write files, run terminals) | blocked |
@@ -23,8 +25,9 @@ Flatpak host escape.
 ```
 Zed Flatpak (cwd = project)          host (systemd --user)                       per connection
 acp-client.py                   ──►  $XDG_RUNTIME_DIR/app/dev.zed.Zed/       ──►  podman run --rm -i
- ACP_CONNECTOR=codex|claude           codex-acp.sock  → acp-broker --profile codex   ~/Git:ro, <project>:rw,
+ ACP_CONNECTOR=codex|claude|zcode     codex-acp.sock  → acp-broker --profile codex   ~/Git:ro, <project>:rw,
  (stdio ↔ socket, no policy)          claude-acp.sock → acp-broker --profile claude  agent-home, <agent>-agent-state
+                                     zcode-acp.sock  → acp-broker --profile zcode
 ```
 
 ## How the project is chosen
@@ -40,7 +43,7 @@ The broker reads the connecting client's directory from
 
 Otherwise the connection is refused with an error shown in Zed, e.g. "Open a
 project inside ~/Git". Sessions must then stay inside that project. The
-client never sends a path; it can only choose which of the two agents to
+client never sends a path; it can only choose which fixed agent to
 talk to.
 
 Each connection gets a fresh `podman run --rm` container: the fixed image,
@@ -75,7 +78,8 @@ The agents run commands inside their container.
   use their own `~/.gradle`, not yours, whose `gradle.properties` may hold
   credentials.
 - **Environment note:** `~/.config/acp-connector/agent-environment.md` is
-  mounted read-only as `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, so
+  mounted read-only as `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` and
+  `~/.zcode/AGENTS.md` (also in the Codex and Claude containers for GLM workers), so
   the agents know all this and don't try `sudo apt`. Edit it as you like.
   `install.sh` replaces it with the repo version only while you haven't
   edited it, and otherwise tells you to compare the two.
@@ -89,7 +93,7 @@ The agents run commands inside their container.
 
 `install.sh` creates `~/.local/share/agent-memory`, a git repository on the
 host, and mounts its `notes/` folder read-write at `~/memory` in every
-container, for both agents and all projects. The environment note tells
+container, for all agents and projects. The environment note tells
 the agents to read `~/memory/INDEX.md` when a thread starts, open the notes
 it lists when they're relevant, and save what matters beyond one project:
 your preferences and corrections, machine setup, gotchas. They check for
@@ -154,7 +158,7 @@ going over SSH through `url.<ssh>.pushInsteadOf` rules.
 **Git worktrees:** a worktree whose main repository is another folder in
 `~/Git` can't commit from the container, because that folder is read-only.
 
-## ACP policy (both agents, enforced on every message)
+## ACP policy (all agents, enforced on every message)
 
 | Direction | Allowed | Everything else |
 |---|---|---|
@@ -188,13 +192,14 @@ file access, and an agent must not be able to use it.
 
 ## Setup (from a host terminal)
 
-Rebuild both images. They share the build-tools layer, so the second build
+Rebuild all three images. They share the build-tools layer, so later builds
 is faster:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
 (cd ~/Git/zed-agent-containers/codex-container && $P build -t localhost/codex-agent:local .)
 (cd ~/Git/zed-agent-containers/claude-container && $P build -t localhost/claude-agent:local .)
+(cd ~/Git/zed-agent-containers/zcode-container && $P build -t localhost/zcode-agent:local .)
 ```
 
 Install. This also migrates the earlier long-lived containers; their state
@@ -203,8 +208,8 @@ volumes and logins are kept:
 ```sh
 cd ~/Git/zed-agent-containers/acp-connector
 ./install.sh            # check the gitconfig, broker.env and agent-environment.md it reports
-systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket
-tests/host-smoke-test.py codex && tests/host-smoke-test.py claude
+systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket zcode-acp-connector.socket
+tests/host-smoke-test.py codex && tests/host-smoke-test.py claude && tests/host-smoke-test.py zcode
 ```
 
 If you still need to log in, use a one-off container with the state volume:
@@ -213,6 +218,8 @@ If you still need to log in, use a one-off container with the state volume:
 $P run --rm -it -v codex-agent-state:/home/node/.codex localhost/codex-agent:local codex login --device-auth
 $P run --rm -it -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
   claude-agent-acp --cli auth login --claudeai
+$P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v zcode-agent-state:/home/node/.zcode localhost/zcode-agent:local zcode
 ```
 
 Zed entries: see `zed-settings.jsonc` (already added to your settings).
@@ -225,16 +232,16 @@ Zed entries: see `zed-settings.jsonc` (already added to your settings).
 3. Optionally turn off host escape:
    `flatpak override --user --no-talk-name=org.freedesktop.Flatpak --env=ZED_FLATPAK_NO_ESCAPE=1 dev.zed.Zed`
 
-**Another git root:** change `--git-root %h/Git` in both
+**Another git root:** change `--git-root %h/Git` in all three
 `*-acp-connector.service` files and rerun `install.sh`.
 
 ## Tested guarantees
 
 `python3 -m unittest -v tests/test_connector.py` (or
-`python3 tests/test_connector.py -v`) runs 24 tests. They pass inside Zed's
+`python3 tests/test_connector.py -v`) runs 25 tests. They pass inside Zed's
 Flatpak without Podman or host escape, and inside the agent containers
-(Python 3.11). The two real-adapter tests skip when that adapter isn't
-installed; each image has only its own. A fake Zed starts the
+(Python 3.11). The real-adapter tests skip when an adapter isn't installed;
+each image has only its own. A fake Zed starts the
 **real client** in a project directory, and it connects over the real
 socket to the broker:
 
@@ -245,7 +252,7 @@ socket to the broker:
     `~/Git` to outside, paths with a comma, and `/`. No agent starts for a
     refused project.
   - A session in a sibling project is rejected.
-- **Container command:** for both profiles, the exact `podman run` flags
+- **Container command:** for all profiles, the exact `podman run` flags
   and mount set are checked: `~/Git` ro, project rw, agent home, state
   volume, and the optional gitconfig, Android SDK, environment note and
   push host keys (all ro, the last with its `GIT_SSH_COMMAND`), agent
@@ -266,15 +273,15 @@ socket to the broker:
   and sockets are 0600.
 - **Socket activation:** the broker does not unlink the systemd-owned
   socket path.
-- **Real adapters, offline, throwaway state:** codex-acp 1.12.0 and
-  claude-agent-acp 0.81.2 both complete the handshake through the policy.
+- **Real adapters, offline, throwaway state:** codex-acp, claude-agent-acp
+  and zcode-acp-server complete the handshake through the policy.
 - **Mutation checks:** disabling the git-root check, the path-character
   check, the read-only flag on `~/Git`, or the session-directory check each
   makes the suite fail.
 
 ## Not tested here / remaining limitations
 
-- **Verified on the host** (`tests/host-smoke-test.py`, both agents, all
+- **Verified on the host** (`tests/host-smoke-test.py`, Codex and Claude, all
   passing): images with build tools and Java, per-connection containers
   with the expected mounts, project rw / rest of `~/Git` ro, writable agent
   home, no host home, git identity, SSH agent forwarding, refusal of

@@ -1,0 +1,12 @@
+[Unit]
+Description=ACP socket for Zed (Flatpak) to ZCode agent containers
+
+[Socket]
+ListenStream=%t/app/dev.zed.Zed/zcode-acp.sock
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+Accept=no
+
+[Install]
+WantedBy=sockets.target

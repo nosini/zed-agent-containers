@@ -3,8 +3,8 @@ Description=ACP broker: Zed (Flatpak) to Codex in per-project containers
 Requires=codex-acp-connector.socket
 After=codex-acp-connector.socket
 # Create the codex-agent-state and shared agent-home volumes (Quadlet) if needed.
-Wants=codex-agent-state-volume.service agent-home-volume.service
-After=codex-agent-state-volume.service agent-home-volume.service
+Wants=codex-agent-state-volume.service zcode-agent-state-volume.service agent-home-volume.service
+After=codex-agent-state-volume.service zcode-agent-state-volume.service agent-home-volume.service
 
 [Service]
 Type=simple

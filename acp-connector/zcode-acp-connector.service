@@ -1,0 +1,13 @@
+[Unit]
+Description=ACP broker: Zed (Flatpak) to ZCode in per-project containers
+Requires=zcode-acp-connector.socket
+After=zcode-acp-connector.socket
+Wants=zcode-agent-state-volume.service agent-home-volume.service
+After=zcode-agent-state-volume.service agent-home-volume.service
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/acp-connector/broker.env
+ExecStart=/usr/bin/python3 -I %h/.local/libexec/acp-connector/acp-broker.py --profile zcode --git-root %h/Git $ACP_BROKER_OPTS
+UMask=0077
+Restart=on-failure

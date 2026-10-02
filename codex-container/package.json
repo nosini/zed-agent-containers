@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "dependencies": {
     "@agentclientprotocol/codex-acp": "1.13.1",
-    "@openai/codex": "0.157.1"
+    "@openai/codex": "0.157.1",
+    "zcode-app-cli": "3.14.4-29"
   },
   "overrides": {
     "@openai/codex": "0.157.1"

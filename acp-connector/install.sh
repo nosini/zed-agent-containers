@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the ACP connectors (Codex and Claude Code). Run from a HOST terminal
+# Install the ACP connectors (Codex, Claude Code and ZCode). Run from a HOST terminal
 # (not in Zed). Copies (never symlinks) host-side code out of ~/Git.
 # Re-run after changing any of these files. Never overwrites your edits to
 # ~/.config/acp-connector/{gitconfig,broker.env,agent-environment.md}; the
@@ -35,7 +35,7 @@ install -d -m 700 "$libexec" "$client" "$settings"
 install -m 555 "$src/acp-broker.py" "$libexec/"
 install -m 755 "$src/acp-client.py" "$client/"
 install -d -m 755 "$units" "$quadlets"
-for agent in codex claude; do
+for agent in codex claude zcode; do
     install -m 644 "$src/$agent-acp-connector.socket" "$src/$agent-acp-connector.service" "$units/"
     install -m 644 "$src/../$agent-container/$agent-agent-state.volume" "$quadlets/"
 done
@@ -169,9 +169,9 @@ if [ -d "$HOME/Android/Sdk" ]; then add_opt --android-sdk "$HOME/Android/Sdk"; f
 echo "Broker options: $(cat "$settings/broker.env")"
 
 systemctl --user daemon-reload
-for agent in codex claude; do
+for agent in codex claude zcode; do
     systemctl --user try-restart "$agent-acp-connector.service"
 done
 echo "Installed. If not done yet:"
-echo "  systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket"
-echo "Rebuild both images after Containerfile changes (see the READMEs)."
+echo "  systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket zcode-acp-connector.socket"
+echo "Rebuild the images after Containerfile changes (see the READMEs)."

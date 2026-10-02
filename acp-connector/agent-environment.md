@@ -22,6 +22,12 @@ directly on the user's machine.
   uses your own `~/.gradle`.
 - `/tmp` is in RAM; put large build output in the project or your home.
 - You cannot run containers (no Podman/Docker).
+- ZCode is installed in all three agent images. When asked to delegate a
+  self-contained task to GLM, run `zcode --prompt '<task>' --json` from the
+  project directory and wait for its result. ZCode is a separate worker
+  process, with its own context; it uses the shared `~/.zcode` login and
+  provider settings. Give it a bounded task and tell it whether edits are
+  allowed. Review its changes before incorporating them.
 - Git commits are signed through the user's SSH agent, and the user
   approves each signature. Don't push unless asked.
 - Pushing works over SSH for the hosts the user set up: `git push` uses

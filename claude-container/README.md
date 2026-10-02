@@ -10,7 +10,9 @@ ACP policy, tests and limitations.
 
 - The same pinned Node 22 base, Debian packages (build tools, Python venv,
   OpenJDK 17, OpenSSH client) and `PATH` setup as `codex-container`. The
-  package layer is shared between the two images.
+  package layer is shared between the three images.
+- `zcode-app-cli` 3.14.4-29 is also available as a GLM worker command;
+  its `~/.zcode` state volume is shared with the ZCode agent.
 - `@agentclientprotocol/claude-agent-acp` 0.81.2. The Claude Code CLI
   (2.1.280) is the locked native binary
   of `@anthropic-ai/claude-agent-sdk` 0.3.280, installed without lifecycle

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Full setup: build both agent images, install the connectors, enable the
+# Full setup: build the agent images, install the connectors, enable the
 # socket units and run the smoke tests. Run from a HOST terminal (not in Zed).
 #   ./install.sh               everything
 #   ./install.sh --no-build    skip the image builds (after editing only the broker)
@@ -25,7 +25,7 @@ src=$(cd "$(dirname "$0")" && pwd)
 podman="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
 
 if [ "$build" = 1 ]; then
-    for agent in codex claude; do
+    for agent in codex claude zcode; do
         echo "== Building localhost/$agent-agent:local"
         (cd "$src/$agent-container" && $podman build -t "localhost/$agent-agent:local" .)
     done
@@ -35,12 +35,13 @@ echo "== Installing connectors"
 "$src/acp-connector/install.sh"
 
 echo "== Enabling sockets"
-systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket
+systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket zcode-acp-connector.socket
 
 if [ "$test" = 1 ]; then
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex
     "$src/acp-connector/tests/host-smoke-test.py" claude
+    "$src/acp-connector/tests/host-smoke-test.py" zcode
 fi
 
-echo "Done. First use of each agent: log in as described in codex-container/README.md and claude-container/README.md."
+echo "Done. Configure each agent as described in its container README."

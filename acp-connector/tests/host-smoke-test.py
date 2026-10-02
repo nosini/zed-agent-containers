@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Host smoke test for an installed connector: host-smoke-test.py codex|claude [PROJECT]
+"""Host smoke test for an installed connector: host-smoke-test.py codex|claude|zcode [PROJECT]
 
 Run from a HOST terminal after install.sh, rebuilding the images and enabling
 the <agent>-acp-connector.socket units. PROJECT defaults to this repository.
@@ -15,7 +15,8 @@ import sys
 import time
 
 AGENTS = {"codex": ("@agentclientprotocol/codex-acp", "/home/node/.codex"),
-          "claude": ("@agentclientprotocol/claude-agent-acp", "/home/node/.claude")}
+          "claude": ("@agentclientprotocol/claude-agent-acp", "/home/node/.claude"),
+          "zcode": ("zcode-acp-server", "/home/node/.zcode")}
 PODMAN = ["podman", "--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs"]
 HOME = os.path.expanduser("~")
 GIT = os.path.join(HOME, "Git")
@@ -90,10 +91,15 @@ def main():
         name = names[0]
         fmt = "{{range .Mounts}}{{.Destination}}:{{.RW}}{{println}}{{end}}"
         mounts = set(sh(*PODMAN, "inspect", name, "--format", fmt).stdout.split())
-        expected = {f"{GIT}:false", f"{project}:true", f"{state}:true", "/home/node:true"}
+        expected = {f"{GIT}:false", f"{project}:true", f"{state}:true", "/home/node:true",
+                    "/home/node/.zcode:true"}
+        agent_instructions = f"{state}/{'CLAUDE.md' if agent == 'claude' else 'AGENTS.md'}:false"
+        if agent_instructions in mounts:
+            expected.add("/home/node/.zcode/AGENTS.md:false")
         optional = {"/opt/agent-git/gitconfig:false", "/opt/agent-git/ssh-agent.sock:true",
                     "/opt/agent-git/known_hosts:false", "/home/node/memory:true",
-                    f"{HOME}/Android/Sdk:false", f"{state}/{'AGENTS.md' if agent == 'codex' else 'CLAUDE.md'}:false"}
+                    f"{HOME}/Android/Sdk:false",
+                    agent_instructions}
         extra = mounts - expected - optional
         check("mounts: ~/Git ro, project rw, agent home, state (+ optional ro extras)",
               expected <= mounts and not extra, str(sorted(mounts)))
@@ -110,6 +116,7 @@ def main():
                   .returncode == 0)
         tools = inside("gcc --version && java -version && python3 -m venv --help && npm --version")
         check("build tools present (gcc, java, venv, npm)", tools.returncode == 0, tools.stderr[-200:])
+        check("ZCode CLI available for GLM work", inside("zcode --version").returncode == 0)
         check("host home not visible", inside(f"! ls -d {HOME}/.ssh {HOME}/.config /run/user/*/bus 2>/dev/null").returncode == 0)
         ident = inside(f"git -C '{project}' config user.name").stdout.strip()
         check("git identity configured", bool(ident), "no user.name; see ~/.config/acp-connector/gitconfig")

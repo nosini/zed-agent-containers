@@ -1,7 +1,7 @@
 #!/bin/sh
 # Update the agent images: move the pinned npm packages to their newest
 # releases that are at least 3 days old, and the Node base image digest to
-# the latest, then rebuild both images without cache so the Debian
+# the latest, then rebuild the images (the first without cache) so the Debian
 # packages are refreshed too. Run from a HOST terminal.
 #   ./update.sh               bump the pins, rebuild, run the smoke tests
 #   ./update.sh --check       only show pinned, latest and chosen versions
@@ -83,7 +83,24 @@ codex_pick=$(pick @openai/codex "$(pinned codex-container @openai/codex)")
 codex_acp_pick=$(pick @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)")
 claude_acp_pick=$(pick @agentclientprotocol/claude-agent-acp \
     "$(pinned claude-container @agentclientprotocol/claude-agent-acp)")
+zcode_acp_pick=$(pick zcode-acp-server "$(pinned zcode-container zcode-acp-server)")
+# ZCode's community CLI uses numeric prerelease builds (e.g. 3.14.4-30).
+# Keep the same publication-age rule without mistaking that suffix for a
+# different npm package or skipping every release as the stable picker would.
+zcode_pick=$(npm_in "$src" view zcode-app-cli time dist-tags.latest --json | python3 -c 'import json, re, sys
+data = json.load(sys.stdin)
+cutoff, pinned = sys.argv[1], sys.argv[2]
+times, latest = data["time"], data["dist-tags.latest"]
+def key(v):
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-(\d+))?", v)
+    if not m: return None
+    return tuple(map(int, m.group(1, 2, 3))) + (m.group(4) is None, int(m.group(4) or 0))
+if key(pinned) is None or key(latest) is None: raise SystemExit("unexpected zcode-app-cli version")
+ok = [v for v, t in times.items() if key(v) is not None and t <= cutoff and key(v) <= key(latest)]
+chosen = max(ok + [pinned], key=key)
+print(chosen, latest, times[chosen])' "$cutoff" "$(pinned zcode-container zcode-app-cli)")
 codex=${codex_pick%% *} codex_acp=${codex_acp_pick%% *} claude_acp=${claude_acp_pick%% *}
+zcode=${zcode_pick%% *} zcode_acp=${zcode_acp_pick%% *}
 $podman pull -q "$base" >/dev/null
 digest=$($podman image inspect --format '{{.Digest}}' "$base")
 case $digest in
@@ -101,6 +118,8 @@ row() {  # row <package> <dir> <pick output>
 row @openai/codex codex-container "$codex_pick"
 row @agentclientprotocol/codex-acp codex-container "$codex_acp_pick"
 row @agentclientprotocol/claude-agent-acp claude-container "$claude_acp_pick"
+row zcode-app-cli zcode-container "$zcode_pick"
+row zcode-acp-server zcode-container "$zcode_acp_pick"
 echo "$base"
 echo "  pinned $current"
 echo "  latest $digest"
@@ -116,14 +135,24 @@ echo "== Updating pins"
 npm_in "$src/codex-container" pkg set "dependencies.@openai/codex=$codex" \
     "overrides.@openai/codex=$codex" "dependencies.@agentclientprotocol/codex-acp=$codex_acp"
 npm_in "$src/claude-container" pkg set "dependencies.@agentclientprotocol/claude-agent-acp=$claude_acp"
+npm_in "$src/zcode-container" pkg set "dependencies.zcode-acp-server=$zcode_acp"
+for image_dir in codex-container claude-container zcode-container; do
+    npm_in "$src/$image_dir" pkg set "dependencies.zcode-app-cli=$zcode"
+done
 # The other dependencies resolve as of the cutoff too. npm refuses pins
 # newer than --before, so a pin kept from an earlier, newer choice moves
 # that image's date up to when the pin was published.
 later() { if [ "$1" \> "$2" ]; then echo "$1"; else echo "$2"; fi; }
 codex_before=$(later "$(later "$cutoff" "${codex_pick##* }")" "${codex_acp_pick##* }")
 claude_before=$(later "$cutoff" "${claude_acp_pick##* }")
-for image_dir in codex-container claude-container; do
-    if [ "$image_dir" = codex-container ]; then before=$codex_before; else before=$claude_before; fi
+zcode_before=$(later "$cutoff" "${zcode_pick##* }")
+zcode_before=$(later "$zcode_before" "${zcode_acp_pick##* }")
+for image_dir in codex-container claude-container zcode-container; do
+    case $image_dir in
+        codex-container) before=$(later "$codex_before" "${zcode_pick##* }") ;;
+        claude-container) before=$(later "$claude_before" "${zcode_pick##* }") ;;
+        zcode-container) before=$zcode_before ;;
+    esac
     [ "$min_age" = 0 ] && before=
     # Pins first, then the other dependencies within their ranges.
     npm_in "$src/$image_dir" install --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
@@ -142,12 +171,16 @@ if [ "$build" = 1 ]; then
     step="building localhost/claude-agent:local"
     echo "== Building localhost/claude-agent:local"
     (cd "$src/claude-container" && $podman build -t localhost/claude-agent:local .)
+    step="building localhost/zcode-agent:local"
+    echo "== Building localhost/zcode-agent:local"
+    (cd "$src/zcode-container" && $podman build -t localhost/zcode-agent:local .)
     step="running the smoke tests"
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex
     "$src/acp-connector/tests/host-smoke-test.py" claude
+    "$src/acp-connector/tests/host-smoke-test.py" zcode
     echo "Images rebuilt. Open threads still run the old ones; to switch (ends open threads):"
-    echo "  systemctl --user restart codex-acp-connector.service claude-acp-connector.service"
+    echo "  systemctl --user restart codex-acp-connector.service claude-acp-connector.service zcode-acp-connector.service"
     echo "Old images: $podman image prune"
 fi
 echo "Review and commit: git -C $src diff"

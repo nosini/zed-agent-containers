@@ -11,6 +11,8 @@ limitations.
 - `@openai/codex` 0.157.1 and `@agentclientprotocol/codex-acp` 1.13.1,
   with dependencies and integrity hashes in `package-lock.json`. npm
   lifecycle scripts are disabled during installation.
+- `zcode-app-cli` 3.14.4-29 is also available as a GLM worker command;
+  its `~/.zcode` state volume is shared with the ZCode agent.
 - Debian packages: Git, OpenSSH client (for SSH commit signing), ripgrep,
   curl, archive tools, `build-essential`, `pkg-config`, `libssl-dev`,
   Python 3 with `venv`/`pip`/headers, and OpenJDK 17. Their versions are not

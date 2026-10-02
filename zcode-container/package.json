@@ -1,0 +1,9 @@
+{
+  "name": "local-zcode-agent",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "zcode-acp-server": "0.52.0",
+    "zcode-app-cli": "3.14.4-29"
+  }
+}

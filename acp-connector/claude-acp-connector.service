@@ -3,8 +3,8 @@ Description=ACP broker: Zed (Flatpak) to Claude Code in per-project containers
 Requires=claude-acp-connector.socket
 After=claude-acp-connector.socket
 # Create the claude-agent-state and shared agent-home volumes (Quadlet) if needed.
-Wants=claude-agent-state-volume.service agent-home-volume.service
-After=claude-agent-state-volume.service agent-home-volume.service
+Wants=claude-agent-state-volume.service zcode-agent-state-volume.service agent-home-volume.service
+After=claude-agent-state-volume.service zcode-agent-state-volume.service agent-home-volume.service
 
 [Service]
 Type=simple

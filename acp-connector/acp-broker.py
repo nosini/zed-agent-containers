@@ -50,10 +50,15 @@ PROFILES = {
     "claude": {"image": "localhost/claude-agent:local", "entry": "claude-agent-acp", "label": "Claude",
                "volume": "claude-agent-state", "state": "/home/node/.claude",
                "instructions": "/home/node/.claude/CLAUDE.md"},
+    "zcode": {"image": "localhost/zcode-agent:local", "entry": "zcode-acp-server", "label": "ZCode",
+              "volume": "zcode-agent-state", "state": "/home/node/.zcode",
+              "instructions": "/home/node/.zcode/AGENTS.md"},
 }
 # Writable home shared by both agents: toolchains they install, build caches.
 HOME_VOLUME = "agent-home"
 HOME_DIR = "/home/node"
+ZCODE_STATE_VOLUME = "zcode-agent-state"
+ZCODE_STATE_DIR = "/home/node/.zcode"
 # Mount targets pre-created in the images (their root filesystem is read-only).
 GIT_CONFIG_TARGET = "/opt/agent-git/gitconfig"   # GIT_CONFIG_GLOBAL in the images
 SSH_AGENT_TARGET = "/opt/agent-git/ssh-agent.sock"
@@ -468,6 +473,10 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
             f"--mount=type=bind,src={git_root},dst={git_root},ro=true",
             f"--mount=type=bind,src={project},dst={project}",
             f"--workdir={project}"]
+    # Claude and Codex can start ZCode as a headless GLM worker. Share its
+    # provider settings and credentials with the standalone ZCode profile.
+    if profile != "zcode":
+        argv.append(f"--mount=type=volume,src={ZCODE_STATE_VOLUME},dst={ZCODE_STATE_DIR}")
     if gitconfig:
         argv.append(f"--mount=type=bind,src={gitconfig},dst={GIT_CONFIG_TARGET},ro=true")
     if ssh_agent:
@@ -478,6 +487,9 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
                  f"--env=ANDROID_HOME={android_sdk}", f"--env=ANDROID_SDK_ROOT={android_sdk}"]
     if instructions:
         argv.append(f"--mount=type=bind,src={instructions},dst={p['instructions']},ro=true")
+        # Workers load their own instructions, independently of the parent agent.
+        if profile != "zcode":
+            argv.append(f"--mount=type=bind,src={instructions},dst={PROFILES['zcode']['instructions']},ro=true")
     if known_hosts:
         argv += [f"--mount=type=bind,src={known_hosts},dst={KNOWN_HOSTS_TARGET},ro=true",
                  f"--env=GIT_SSH_COMMAND={GIT_SSH_COMMAND}"]

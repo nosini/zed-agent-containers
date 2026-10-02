@@ -28,6 +28,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     CLAUDE_CONFIG_DIR=/home/node/.claude \
     DISABLE_AUTOUPDATER=1 \
     DISABLE_TELEMETRY=1 \
+    ZCODE_DISABLE_UPDATE_CHECK=1 \
     NO_BROWSER=1 \
     GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
 
@@ -36,8 +37,8 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
 # (the root filesystem is read-only at runtime).
 RUN mkdir -p /opt/agent-git \
  && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock /opt/agent-git/known_hosts
-RUN mkdir -p /home/node/.claude /workspace \
- && chown node:node /home/node/.claude
+RUN mkdir -p /home/node/.claude /home/node/.zcode /workspace \
+ && chown node:node /home/node/.claude /home/node/.zcode
 COPY settings.json /home/node/.claude/settings.json
 RUN chown node:node /home/node/.claude/settings.json
 USER node

@@ -37,6 +37,12 @@ CLAUDE_ACP_BIN = next((p for p in (
     "/opt/agent/node_modules/.bin/claude-agent-acp",
     os.path.expanduser("~/.var/app/dev.zed.Zed/data/zed/external_agents/registry/npx/claude-acp/"
                        "node_modules/.bin/claude-agent-acp")) if p and os.path.exists(p)), None)
+ZCODE_ACP_BIN = next((p for p in (
+    os.environ.get("ZCODE_AGENT_ACP", ""),
+    "/opt/agent/node_modules/.bin/zcode-acp-server") if p and os.path.exists(p)), None)
+ZCODE_BIN = next((p for p in (
+    os.environ.get("ZCODE_BIN", ""),
+    "/opt/agent/node_modules/.bin/zcode") if p and os.path.exists(p)), None)
 FORBIDDEN_PREFIXES = ("fs/", "terminal/", "mcp/", "elicitation/", "_")
 
 
@@ -331,7 +337,7 @@ class ThreadTitleTests(unittest.TestCase):
 
     def test_production_profiles_have_labels(self):
         self.assertEqual({k: v["label"] for k, v in self.broker.PROFILES.items()},
-                         {"codex": "Codex", "claude": "Claude"})
+                         {"codex": "Codex", "claude": "Claude", "zcode": "ZCode"})
 
 
 class LifecycleTests(BrokerTest):
@@ -478,7 +484,8 @@ class ActivationTest(BrokerTest):
             s.bind(agent_sock)
         for profile, image, entry, state, notes_dst in (
                 ("codex", "codex-agent", "codex-acp", "/home/node/.codex", "/home/node/.codex/AGENTS.md"),
-                ("claude", "claude-agent", "claude-agent-acp", "/home/node/.claude", "/home/node/.claude/CLAUDE.md")):
+                ("claude", "claude-agent", "claude-agent-acp", "/home/node/.claude", "/home/node/.claude/CLAUDE.md"),
+                ("zcode", "zcode-agent", "zcode-acp-server", "/home/node/.zcode", "/home/node/.zcode/AGENTS.md")):
             with self.subTest(profile=profile):
                 if os.path.exists(self.sock):
                     os.unlink(self.sock)
@@ -501,7 +508,7 @@ class ActivationTest(BrokerTest):
                              " -o StrictHostKeyChecking=yes"):
                     self.assertIn(flag, argv)
                 mounts = sorted(a for a in argv if a.startswith("--mount="))
-                self.assertEqual(mounts, sorted([
+                expected_mounts = [
                     "--mount=type=volume,src=agent-home,dst=/home/node",
                     f"--mount=type=volume,src={image}-state,dst={state}",
                     f"--mount=type=bind,src={sdk},dst={sdk},ro=true",
@@ -511,7 +518,11 @@ class ActivationTest(BrokerTest):
                     f"--mount=type=bind,src={gitconfig},dst=/opt/agent-git/gitconfig,ro=true",
                     f"--mount=type=bind,src={known_hosts},dst=/opt/agent-git/known_hosts,ro=true",
                     f"--mount=type=bind,src={agent_sock},dst=/opt/agent-git/ssh-agent.sock",
-                    f"--mount=type=bind,src={memory},dst=/home/node/memory"]))
+                    f"--mount=type=bind,src={memory},dst=/home/node/memory"]
+                if profile != "zcode":
+                    expected_mounts.append("--mount=type=volume,src=zcode-agent-state,dst=/home/node/.zcode")
+                    expected_mounts.append(f"--mount=type=bind,src={notes},dst=/home/node/.zcode/AGENTS.md,ro=true")
+                self.assertEqual(mounts, sorted(expected_mounts))
                 self.assertEqual(argv[-2:], [f"localhost/{image}:local", entry])
                 self.broker.terminate()
                 self.broker.wait(20)
@@ -599,6 +610,23 @@ class RealClaudeAgentAcpTest(BrokerTest):
         self.assertIn("removed 1 forwarded MCP server", log)
         self.assertIn("blocked agent notification '_auth/status_update'", log)
         self.assertEqual(os.listdir(home), [])
+
+
+@unittest.skipUnless(ZCODE_ACP_BIN and ZCODE_BIN and shutil.which("node"), "ZCode ACP and CLI not available")
+class RealZcodeAcpTest(BrokerTest):
+    """Offline handshake with the real ZCode adapter and throwaway state."""
+    mode = "real"
+
+    def test_handshake_through_policy(self):
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(home)
+        env = dict(os.environ, HOME=home, ZCODE_BIN=ZCODE_BIN, ZCODE_DISABLE_UPDATE_CHECK="1")
+        self.start_broker(ZCODE_ACP_BIN, env=env)
+        init = self.zed().initialize()
+        self.assertEqual(init["result"]["agentInfo"]["name"], "zcode-acp-server")
+        self.assertFalse(find_meta(init))
+        self.assertEqual(init["result"]["agentCapabilities"]["mcpCapabilities"],
+                         {"http": False, "sse": False})
 
 
 if __name__ == "__main__":
