@@ -67,7 +67,7 @@ GIT_SSH_COMMAND = f"ssh -o UserKnownHostsFile={KNOWN_HOSTS_TARGET} -o StrictHost
 
 MAX_LINE = 64 * 1024 * 1024
 MAX_PENDING = 256
-MAX_SESSIONS = 4
+DEFAULT_MAX_CONNECTIONS = 16
 BUSY_TIMEOUT = 10
 AGENT_EXIT_GRACE = 5
 AGENT_TERM_GRACE = 3
@@ -499,11 +499,12 @@ def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_s
 
 
 class Broker:
-    def __init__(self, launcher, git_root, name):
+    def __init__(self, launcher, git_root, name, max_connections=DEFAULT_MAX_CONNECTIONS):
         self.hint = f"see journalctl --user -u {name}-acp-connector"
         self.launcher = launcher
         self.git_root = git_root
         self.name = name
+        self.max_connections = max_connections
         self.active = 0
         self.counter = 0
         self.tasks = set()
@@ -521,8 +522,11 @@ class Broker:
             if project is None:
                 await self.refuse(reader, writer, tag, reason[0].upper() + reason[1:])
                 return
-            if self.active >= MAX_SESSIONS:
-                await self.refuse(reader, writer, tag, f"Connector busy: at most {MAX_SESSIONS} concurrent sessions")
+            if self.active >= self.max_connections:
+                await self.refuse(reader, writer, tag,
+                                  f"Connector busy: at most {self.max_connections} concurrent connections per agent. "
+                                  "Open projects can keep connections alive; close an unused project or increase "
+                                  f"--max-connections in broker.env; {self.hint}")
                 return
             self.active += 1
             try:
@@ -714,8 +718,9 @@ async def remove_stale(profile):
         await run_quiet([*PODMAN, "rm", "--force", "--ignore", *ids])
 
 
-async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=None):
-    broker = Broker(launcher, git_root, name)
+async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=None,
+                max_connections=DEFAULT_MAX_CONNECTIONS):
+    broker = Broker(launcher, git_root, name, max_connections)
     extra = {}
     if sys.version_info >= (3, 13):
         # We unlink the path ourselves below, the same way on every Python.
@@ -729,7 +734,7 @@ async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=N
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
-    log(f"listening; profile: {name}; git root: {git_root}")
+    log(f"listening; profile: {name}; git root: {git_root}; max connections: {max_connections}")
     async with server:
         await stop.wait()
         server.close()
@@ -756,8 +761,12 @@ def main():
     ap.add_argument("--instructions", help="environment notes for the agents (AGENTS.md/CLAUDE.md), read-only")
     ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
     ap.add_argument("--memory", help="notes directory shared by all agents, mounted read-write at ~/memory")
+    ap.add_argument("--max-connections", type=int, default=DEFAULT_MAX_CONNECTIONS,
+                    help=f"maximum concurrent connections per agent (default: {DEFAULT_MAX_CONNECTIONS})")
     ap.add_argument("--socket", help="listen here instead of using systemd socket activation")
     args = ap.parse_args()
+    if args.max_connections < 1:
+        ap.error("--max-connections must be a positive integer")
     git_root = os.path.realpath(args.git_root)
     for opt, path in (("--git-root", git_root), ("--git-config", args.git_config),
                       ("--ssh-agent-socket", args.ssh_agent_socket), ("--android-sdk", args.android_sdk),
@@ -782,7 +791,8 @@ def main():
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
                                args.android_sdk, args.instructions, args.known_hosts, args.memory)
-    asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile)))
+    asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
+                      max_connections=args.max_connections))
 
 
 if __name__ == "__main__":

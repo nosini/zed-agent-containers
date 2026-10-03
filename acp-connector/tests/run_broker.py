@@ -1,10 +1,11 @@
 """Test harness: run the broker with a substitute agent command.
 
-  run_broker.py mock SOCKET GIT_ROOT [MAX_LINE]    -- hostile mock agent
+  run_broker.py mock SOCKET GIT_ROOT [--max-line N] [--max-connections N] -- hostile mock agent
   run_broker.py real SOCKET GIT_ROOT CMD [ARGS...] -- a real ACP adapter
   run_broker.py activate SOCKET GIT_ROOT PROFILE   -- production main() via socket activation
 """
 
+import argparse
 import asyncio
 import importlib.util
 import os
@@ -36,14 +37,20 @@ def main():
         os.execv(sys.executable, [sys.executable, "-I", BROKER, "--profile", sys.argv[4], "--git-root", git_root,
                                   *sys.argv[5:]])
     broker = load_broker()
+    max_connections = broker.DEFAULT_MAX_CONNECTIONS
     if mode == "mock":
-        if len(sys.argv) > 4:
-            broker.MAX_LINE = int(sys.argv[4])
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--max-line", type=int, default=broker.MAX_LINE)
+        ap.add_argument("--max-connections", type=int, default=max_connections)
+        args = ap.parse_args(sys.argv[4:])
+        broker.MAX_LINE = args.max_line
+        max_connections = args.max_connections
         base = [sys.executable, os.path.join(HERE, "mock_agent.py")]
         launcher = lambda project, name: (base + [project], None)  # mock logs the project it got
     else:
         launcher = lambda project, name: (sys.argv[4:], None)
-    asyncio.run(broker.serve(broker.bind_socket(sock_path), launcher, git_root))
+    asyncio.run(broker.serve(broker.bind_socket(sock_path), launcher, git_root,
+                            max_connections=max_connections))
 
 
 if __name__ == "__main__":

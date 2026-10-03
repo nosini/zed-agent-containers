@@ -364,20 +364,47 @@ class LifecycleTests(BrokerTest):
         resp = z.request("session/prompt", {"sessionId": "s1", "prompt": [{"type": "text", "text": "exit"}]})
         self.assertIn("agent exited", resp["error"]["message"])
         z.proc.wait(10)
-        self.assertEqual(z.proc.returncode, 0)
+        self.assertEqual(z.proc.returncode, 1)
+        self.assertIn(b"broker connection closed unexpectedly", z.proc.stderr.read())
 
-    def test_session_limit(self):
+    def test_default_connection_limit(self):
         self.start_broker()
-        for _ in range(4):  # MAX_SESSIONS
-            self.zed().initialize()
-        resp = self.zed().initialize()
+        for _ in range(16):
+            self.assertIn("result", self.zed().initialize())
+        refused = self.zed()
+        resp = refused.initialize()
         self.assertIn("busy", resp["error"]["message"])
+        self.assertIn("16 concurrent connections", resp["error"]["message"])
+        self.assertEqual(len(self.mock_entries("pid")), 16, "refusal must not start an agent")
+        refused.proc.wait(10)
+        self.assertEqual(refused.proc.returncode, 1)
+        self.assertIn(b"journalctl --user", refused.proc.stderr.read())
+
+    def test_configured_connection_limit_and_slot_reuse(self):
+        self.start_broker("--max-connections", "2")
+        for _ in range(2):
+            self.assertIn("result", self.zed().initialize())
+        resp = self.zed().initialize()
+        self.assertIn("2 concurrent connections", resp["error"]["message"])
+        self.assertIn("--max-connections in broker.env", resp["error"]["message"])
+        self.assertEqual(len(self.mock_entries("pid")), 2)
+        pid = self.mock_entries("pid")[0]["obj"]
         self.zeds[0].close()
-        time.sleep(0.5)
+        self.assertTrue(wait_for(lambda: not pid_alive(pid)))
+        self.assertTrue(wait_for(lambda: "agent ended" in self.broker_text()))
         self.assertIn("result", self.zed().initialize())
 
+    def test_broker_shutdown_reports_unexpected_disconnect(self):
+        self.start_broker()
+        z = self.zed()
+        z.initialize()
+        self.stop(self.broker)
+        z.proc.wait(10)
+        self.assertEqual(z.proc.returncode, 1)
+        self.assertIn(b"broker connection closed unexpectedly", z.proc.stderr.read())
+
     def test_oversized_message_closes_only_that_connection(self):
-        self.start_broker("1048576")
+        self.start_broker("--max-line", "1048576")
         z = self.zed()
         z.initialize()
         z.raw(b'{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"x":"' + b"A" * 2_000_000 + b'"}}')
@@ -531,7 +558,10 @@ class ActivationTest(BrokerTest):
                       ["--profile", "codex", "--instructions", self.root],
                       ["--profile", "codex", "--known-hosts", os.path.join(self.tmp, "missing")],
                       ["--profile", "codex", "--memory", os.path.join(self.tmp, "missing")],
-                      ["--profile", "codex", "--memory", self.git + "/a=b"]):
+                      ["--profile", "codex", "--memory", self.git + "/a=b"],
+                      ["--profile", "codex", "--max-connections", "0"],
+                      ["--profile", "codex", "--max-connections", "-1"],
+                      ["--profile", "codex", "--max-connections", "many"]):
             p = subprocess.run([sys.executable, "-I", broker, "--git-root", self.git, "--socket", self.sock,
                                 *extra], capture_output=True, timeout=20)
             self.assertEqual(p.returncode, 2, extra)

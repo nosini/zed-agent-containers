@@ -57,6 +57,19 @@ one container.
   is when Zed closes it or the broker restarts. Only then do the threads
   pick up a rebuilt image. The broker also removes leftovers from a crash
   when it starts.
+- **Connection limit:** each agent's broker allows 16 concurrent connections
+  by default. Open projects can keep connections alive even while their
+  threads are idle. To change the limit, add e.g. `--max-connections 32` inside
+  `ACP_BROKER_OPTS` in `~/.config/acp-connector/broker.env`, then restart the
+  affected broker service. This changes how many containers can run at once;
+  it does not limit their memory or CPU use.
+
+If the limit is reached, the broker refuses the new connection without
+starting a container. Close an unused project or raise the limit. The
+refusal and configured limit appear in
+`journalctl --user -u codex-acp-connector` (or `claude-acp-connector`). An
+unexpected broker disconnect exits the client with status 1 and a log hint;
+closing the editor's input normally exits with status 0.
 
 ## Building and testing
 
@@ -231,7 +244,7 @@ Zed entries: see `zed-settings.jsonc` (already added to your settings).
 ## Tested guarantees
 
 `python3 -m unittest -v tests/test_connector.py` (or
-`python3 tests/test_connector.py -v`) runs 24 tests. They pass inside Zed's
+`python3 tests/test_connector.py -v`) runs the connector tests. They pass inside Zed's
 Flatpak without Podman or host escape, and inside the agent containers
 (Python 3.11). The two real-adapter tests skip when that adapter isn't
 installed; each image has only its own. A fake Zed starts the
@@ -261,7 +274,9 @@ socket to the broker:
   extensions don't reach the agent.
 - **Lifecycle:** disconnect stops the agent. An agent that ignores EOF and
   SIGTERM is killed, and its container removal is triggered. A crash is
-  reported. There are at most 4 connections per agent. An oversized message
+  reported with a nonzero client exit. The default limit of 16 connections
+  per agent, a configured lower limit, and reuse after disconnect are checked.
+  An oversized message
   closes only its own connection. Stale and non-socket paths are handled,
   and sockets are 0600.
 - **Socket activation:** the broker does not unlink the systemd-owned
