@@ -9,8 +9,8 @@ ACP policy, tests and limitations.
 ## Image
 
 - The same pinned Node 22 base, Debian packages (build tools, Python venv,
-  OpenJDK 17, OpenSSH client) and `PATH` setup as `codex-container`. The
-  package layer is shared between the two images.
+  OpenJDK 17, OpenSSH client, `flatpak-builder`) and `PATH` setup as
+  `codex-container`. The package layer is shared between the two images.
 - `@agentclientprotocol/claude-agent-acp` 0.81.2. The Claude Code CLI
   (2.1.280) is the locked native binary
   of `@anthropic-ai/claude-agent-sdk` 0.3.280, installed without lifecycle

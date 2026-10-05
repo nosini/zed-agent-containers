@@ -9,7 +9,7 @@ directly on the user's machine.
 - You are uid 1000 (`node`) without sudo; you cannot install system
   packages. Installed: Node 22 + npm, Python 3.11 (`venv`, `pip`), gcc/make
   (`build-essential`, `pkg-config`, `libssl-dev`), OpenJDK 17, git, curl,
-  ripgrep, zip/unzip/xz.
+  ripgrep, zip/unzip/xz, flatpak-builder.
 - Your home, `/home/node`, is writable and persists between sessions. It's
   shared with the other agent. Install extra toolchains there when a
   project needs them; their bin directories are already on `PATH`:

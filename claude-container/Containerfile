@@ -12,6 +12,7 @@ RUN mkdir -p /usr/share/man/man1 \
       ca-certificates git ripgrep openssh-client curl procps file less \
       zip unzip xz-utils bzip2 build-essential pkg-config libssl-dev \
       python3 python3-dev python3-venv python3-pip openjdk-17-jdk-headless \
+      flatpak-builder \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/agent
