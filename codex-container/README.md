@@ -13,7 +13,8 @@ limitations.
   lifecycle scripts are disabled during installation.
 - Debian packages: Git, OpenSSH client (for SSH commit signing), ripgrep,
   curl, archive tools, `build-essential`, `pkg-config`, `libssl-dev`,
-  Python 3 with `venv`/`pip`/headers, OpenJDK 17, and `flatpak-builder`.
+  Python 3 with `venv`/`pip`/headers, OpenJDK 17, `flatpak-builder`, and
+  `rpm` (for `rpmbuild`).
   Their versions are not frozen, so uncached rebuilds (`../update.sh`)
   pick up security updates. This step is identical in the Claude image,
   so the layer is shared.

@@ -76,7 +76,7 @@ closing the editor's input normally exits with status 0.
 The agents run commands inside their container.
 - **In the images:** Node 22 + npm, Python 3.11 with `venv`/`pip`,
   `build-essential`, `pkg-config`, `libssl-dev`, OpenJDK 17, git, curl,
-  archive tools and `flatpak-builder`.
+  archive tools, `flatpak-builder` and `rpmbuild`.
 - **Toolchains the agents install themselves:** anything else goes into the
   shared, persistent `agent-home` volume, without root. That covers
   `rustup`, `uv` (other Python versions), the Go tarball in `~/.local/go`,
