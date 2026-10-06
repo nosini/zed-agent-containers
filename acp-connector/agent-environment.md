@@ -9,10 +9,32 @@ directly on the user's machine.
 - You are uid 1000 (`node`) without sudo; you cannot install system
   packages. Installed: Node 22 + npm, Python 3.11 (`venv`, `pip`), gcc/make
   (`build-essential`, `pkg-config`, `libssl-dev`), OpenJDK 17, git, curl,
-  ripgrep, zip/unzip/xz, flatpak-builder, rpmbuild.
+  ripgrep, zip/unzip/xz, flatpak-builder, rpmbuild, Meson, Ninja, jsdom.
 - Your home, `/home/node`, is writable and persists between sessions. It's
-  shared with the other agent. Install extra toolchains there when a
-  project needs them; their bin directories are already on `PATH`:
+  shared with the other agent.
+  - Keep each project's temporary files, reviews, logs, source copies,
+    local builds and project-specific virtualenvs under `~/PROJECT`, using
+    the repository's name: for example, `~/scopevault/tmp`,
+    `~/scopevault/reviews` and `~/scopevault/builds`. Use task subdirectories
+    when several runs or agents work on the same project. Build output
+    that normally belongs in the repository can stay there.
+  - Don't scatter task folders or files directly in `~/` or the shared
+    `~/.cache`. Clean up completed scratch runs once their changes have
+    been incorporated or superseded, preserving work still in progress.
+  - Reusable tooling, including Python packages and environments used
+    across projects, can be installed in shared tool directories such as
+    `~/.local/venvs`, `~/.local/opt` and the toolchain directories below.
+    Package managers' normal shared download caches are fine.
+- Before downloading, building or installing additional tooling or
+  Python/other packages locally, check whether Debian apt provides a
+  package with the version and features needed. If it does, ask the user
+  to add that package to the agent images and rebuild them; wait for that
+  installation instead of making a local copy. If apt has no suitable
+  package, or its version is too old, you may download or build the needed
+  version yourself. Explain why the apt package won't work and put the
+  local installation in the appropriate project or shared tool directory.
+- Extra toolchains can be installed in the shared home when apt doesn't
+  provide a suitable version; their bin directories are already on `PATH`:
   - Rust: `rustup` (`~/.cargo`)
   - Other Python versions and tools: `uv` (`~/.local/bin`)
   - Go: the official tarball extracted to `~/.local/go`
@@ -20,7 +42,8 @@ directly on the user's machine.
 - Android: `$ANDROID_HOME` is the user's SDK, read-only. If a build needs a
   missing SDK component, ask the user to install it on the host. Gradle
   uses your own `~/.gradle`.
-- `/tmp` is in RAM; put large build output in the project or your home.
+- `/tmp` is in RAM; put large build output in the repository or its
+  `~/PROJECT/builds` directory.
 - You cannot run containers (no Podman/Docker).
 - Git commits are signed through the user's SSH agent, and the user
   approves each signature. Don't push unless asked.
