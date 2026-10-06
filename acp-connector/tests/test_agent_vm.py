@@ -27,6 +27,8 @@ server = load("agent-vm-server")
 client = load("agent-vm-client")
 broker = load("acp-broker")
 policy = load("container-policy")
+CLIENT_IDENTIFICATION = b"SSH-2.0-test-client\r\n"
+SERVER_IDENTIFICATION = b"SSH-2.0-test-server\r\n"
 
 
 class FakeDomain:
@@ -70,7 +72,7 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp.name)
         self.domain = FakeDomain()
         self.relay = server.Relay(self.domain, "127.0.0.1", 1, self.root / "holds.json", os.getuid(),
-                                  idle_seconds=0.01, boot_seconds=0.02, shutdown_seconds=0.02)
+                                  idle_seconds=0.01, boot_seconds=3, shutdown_seconds=0.02)
         self.tasks = set()
         self.servers = []
         self.writers = []
@@ -101,7 +103,7 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
 
-    async def tcp(self, callback=None):
+    async def tcp(self, callback=None, handshake=True):
         async def echo(reader, writer):
             try:
                 data = await reader.read()
@@ -110,13 +112,23 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
             finally:
                 writer.close()
                 await writer.wait_closed()
-        instance = await asyncio.start_server(self.track(callback or echo), "127.0.0.1", 0)
+        async def identify(reader, writer):
+            self.assertEqual(await reader.readline(), CLIENT_IDENTIFICATION)
+            writer.write(SERVER_IDENTIFICATION)
+            await writer.drain()
+            await (callback or echo)(reader, writer)
+        instance = await asyncio.start_server(self.track(identify if handshake else callback), "127.0.0.1", 0)
         self.servers.append(instance)
         self.relay.port = instance.sockets[0].getsockname()[1]
 
-    async def ssh(self):
+    async def ssh(self, expect_banner=True, send_identification=True):
         reader, writer = await asyncio.open_unix_connection(self.ssh_path)
         self.writers.append(writer)
+        if send_identification:
+            writer.write(CLIENT_IDENTIFICATION)
+            await writer.drain()
+        if expect_banner:
+            self.assertEqual(await asyncio.wait_for(reader.readline(), 3), SERVER_IDENTIFICATION)
         return reader, writer
 
     async def control(self, request):
@@ -213,14 +225,14 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         idle = asyncio.create_task(self.relay.idle_check())
         while self.domain.state != 4:
             await asyncio.sleep(0.005)
-        reader, writer = await self.ssh()
+        reader, writer = await self.ssh(expect_banner=False)
         writer.write(b"after-shutdown")
         writer.write_eof()
         await asyncio.sleep(0.02)
         self.assertEqual(self.domain.starts, 1)
         self.domain.state, self.domain.runtime_id = 5, -1
         await idle
-        self.assertEqual(await asyncio.wait_for(reader.read(), 3), b"reply:after-shutdown")
+        self.assertEqual(await asyncio.wait_for(reader.read(), 3), SERVER_IDENTIFICATION + b"reply:after-shutdown")
         self.assertEqual(self.domain.starts, 2)
 
     async def test_control_is_bounded_fixed_and_does_not_start_vm(self):
@@ -239,7 +251,7 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_different_uid_is_refused(self):
         self.relay.allowed_uid = os.getuid() + 1
-        reader, _ = await self.ssh()
+        reader, _ = await self.ssh(expect_banner=False, send_identification=False)
         self.assertEqual(await reader.read(), b"")
         self.assertEqual(self.domain.starts, 0)
 
@@ -252,15 +264,76 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(status["holds"]), server.MAX_HOLDS)
 
     async def test_boot_timeout_cleans_up_activity(self):
+        self.relay.boot_seconds = 0.02
         # Reserve and release a port to get a currently closed endpoint.
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             self.relay.port = probe.getsockname()[1]
-        reader, _ = await self.ssh()
+        reader, _ = await self.ssh(expect_banner=False)
         with self.assertLogs("agent-vm", level="ERROR"):
             self.assertEqual(await asyncio.wait_for(reader.read(), 3), b"")
         await self.settle()
         self.assertEqual(self.relay.active + self.relay.controls, 0)
+
+    async def test_cold_boot_retries_early_disconnects_without_closing_client(self):
+        attempts = []
+        preamble = b"VM ready\r\n"
+        packet = b"\x00\xffkey-exchange"
+
+        async def booting(reader, writer):
+            try:
+                attempts.append(await reader.readline())
+                if len(attempts) == 1:
+                    return  # TCP accepted while the VM is still booting.
+                if len(attempts) == 2:
+                    writer.write(b"VM not ready\r\n")
+                    return
+                if len(attempts) == 3:
+                    writer.write(b"SSH-2.0-incomplete")
+                    return
+                writer.write(preamble + SERVER_IDENTIFICATION + packet)
+                await writer.drain()
+                writer.write(await reader.read())
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        await self.tcp(booting, handshake=False)
+        reader, writer = await self.ssh(expect_banner=False)
+        writer.write(b"client-payload")
+        writer.write_eof()
+        response = await asyncio.wait_for(reader.read(), 4)
+        self.assertEqual(response, preamble + SERVER_IDENTIFICATION + packet + b"client-payload")
+        self.assertEqual(attempts, [CLIENT_IDENTIFICATION] * 4)
+        self.assertEqual(self.domain.starts, 1)
+        await self.settle()
+        self.assertEqual(self.relay.active, 0)
+
+    async def test_silent_listener_obeys_boot_deadline_and_keeps_controls_available(self):
+        self.relay.boot_seconds = 0.1
+        connected = asyncio.Event()
+
+        async def silent(reader, writer):
+            try:
+                self.assertEqual(await reader.readline(), CLIENT_IDENTIFICATION)
+                connected.set()
+                self.assertEqual(await reader.read(), b"")
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        await self.tcp(silent, handshake=False)
+        started = asyncio.get_running_loop().time()
+        reader, _ = await self.ssh(expect_banner=False)
+        with self.assertLogs("agent-vm", level="ERROR") as logs:
+            await asyncio.wait_for(connected.wait(), 1)
+            self.assertTrue((await self.control({"op": "status"}))["ok"])
+            self.assertEqual(await asyncio.wait_for(reader.read(), 1), b"")
+        self.assertLess(asyncio.get_running_loop().time() - started, 1)
+        self.assertIn("boot timeout", logs.output[-1])
+        await self.settle()
+        self.assertEqual(self.relay.active, 0)
 
     async def test_shutdown_errors_are_not_retried(self):
         for attribute in ("shutdown_error", "state_error_after_shutdown"):
@@ -307,7 +380,7 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         connections = await asyncio.gather(*(self.ssh() for _ in range(server.MAX_CONNECTIONS)))
         await asyncio.gather(*(reader.readline() for reader, _ in connections))
         self.assertEqual(self.relay.active, server.MAX_CONNECTIONS)
-        overflow, _ = await self.ssh()
+        overflow, _ = await self.ssh(expect_banner=False, send_identification=False)
         self.assertEqual(await overflow.read(), b"")
         status = await self.control({"op": "status"})
         self.assertEqual(status["ssh_connections"], server.MAX_CONNECTIONS)
@@ -411,9 +484,9 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
                                                     stdout=asyncio.subprocess.PIPE,
                                                     stderr=asyncio.subprocess.PIPE)
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(sent), 10)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(CLIENT_IDENTIFICATION + sent), 10)
             self.assertEqual(proc.returncode, 0, stderr.decode())
-            self.assertEqual(stdout, greeting + b"done")
+            self.assertEqual(stdout, SERVER_IDENTIFICATION + greeting + b"done")
         finally:
             if proc.returncode is None:
                 proc.kill()

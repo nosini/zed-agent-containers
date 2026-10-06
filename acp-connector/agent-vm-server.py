@@ -135,15 +135,50 @@ class Relay:
             elif state not in (1, 2):  # RUNNING, BLOCKED
                 raise RuntimeError("VM is paused, shutting down or in an unexpected state")
 
-    async def backend(self):
-        deadline = asyncio.get_running_loop().time() + self.boot_seconds
-        while True:
+    async def backend(self, identification):
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        deadline = started + self.boot_seconds
+        waiting = False
+
+        async def connect():
+            reader, writer = await asyncio.open_connection(self.address, self.port, limit=4096)
             try:
-                return await asyncio.wait_for(asyncio.open_connection(self.address, self.port), 3)
-            except (OSError, asyncio.TimeoutError):
-                if asyncio.get_running_loop().time() >= deadline:
-                    raise TimeoutError("VM SSH did not become reachable before the boot timeout")
-                await asyncio.sleep(0.5)
+                # Replay only the client's public identification on retries.
+                # Key exchange and authentication remain with the SSH client.
+                writer.write(identification)
+                await writer.drain()
+                banner = bytearray()
+                while len(banner) < 8192:
+                    line = await reader.readline()
+                    if not line.endswith(b"\n"):
+                        raise ConnectionError("VM closed before its SSH identification")
+                    banner.extend(line)
+                    if line.startswith(b"SSH-"):
+                        if len(line) > 255 or b"\0" in line:
+                            raise ConnectionError("invalid VM SSH identification")
+                        return reader, writer, bytes(banner)
+                raise ConnectionError("VM SSH preamble is too large")
+            except BaseException:
+                writer.close()
+                with contextlib.suppress(OSError, asyncio.TimeoutError):
+                    await asyncio.wait_for(writer.wait_closed(), 0.5)
+                raise
+
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("VM SSH did not become ready before the boot timeout")
+            try:
+                connection = await asyncio.wait_for(connect(), min(10, remaining))
+                if waiting:
+                    LOG.info("VM SSH became ready after %.1f seconds", loop.time() - started)
+                return connection
+            except (OSError, ValueError, asyncio.TimeoutError):
+                if not waiting:
+                    LOG.info("waiting for VM SSH readiness")
+                    waiting = True
+                await asyncio.sleep(min(0.5, max(0, deadline - loop.time())))
 
     @staticmethod
     async def copy(reader, writer):
@@ -164,7 +199,13 @@ class Relay:
         tasks = []
         try:
             await self.ensure_running()
-            remote_reader, remote = await self.backend()
+            identification = await asyncio.wait_for(reader.readline(), self.boot_seconds)
+            if (not identification.startswith(b"SSH-") or not identification.endswith(b"\n") or
+                    len(identification) > 255 or b"\0" in identification):
+                raise RuntimeError("invalid SSH client identification")
+            remote_reader, remote, banner = await self.backend(identification)
+            writer.write(banner)
+            await writer.drain()
             tasks = [asyncio.create_task(self.copy(reader, remote)),
                      asyncio.create_task(self.copy(remote_reader, writer))]
             await asyncio.gather(*tasks)

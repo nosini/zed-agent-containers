@@ -1,11 +1,13 @@
 # On-demand build/test VM
 
 Agents connect using `ssh -F ~/.ssh/agent-vm.conf agent-vm`. The desktop
-starts the configured VM if it is off, waits for SSH, and forwards the
-connection. A cold boot can take several minutes. After the last relayed
-SSH connection closes, the VM shuts down gracefully after 15 minutes,
-unless a job has a keep-awake hold. VMs started manually stay under manual
-control. The helper never forces a power-off.
+starts the configured VM if it is off, waits for its SSH identification,
+and forwards the connection. TCP connections that close or stall before
+SSH is ready are retried within the configured boot limit, keeping the
+original client connection open. A cold boot can take several minutes.
+After the last relayed SSH connection closes, the VM shuts down gracefully
+after 15 minutes, unless a job has a keep-awake hold. VMs started manually
+stay under manual control. The helper never forces a power-off.
 
 ## Install
 
