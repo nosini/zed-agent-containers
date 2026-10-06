@@ -39,6 +39,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
 # (the root filesystem is read-only at runtime).
 RUN mkdir -p /opt/agent-git \
  && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock /opt/agent-git/known_hosts
+RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
 RUN mkdir -p /home/node/.claude /workspace \
  && chown node:node /home/node/.claude
 COPY settings.json /home/node/.claude/settings.json

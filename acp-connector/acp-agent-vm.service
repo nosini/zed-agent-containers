@@ -1,0 +1,18 @@
+[Unit]
+Description=On-demand agent VM SSH relay
+Requires=acp-agent-vm.socket
+After=acp-agent-vm.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/acp-agent-vm/agent-vm-server.py
+StateDirectory=acp-agent-vm
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+Restart=on-failure
+RestartSec=5

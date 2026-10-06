@@ -32,6 +32,7 @@ import asyncio
 import json
 import os
 import posixpath
+import runpy
 import shlex
 import signal
 import socket
@@ -39,7 +40,8 @@ import stat
 import struct
 import sys
 
-PODMAN = ("/usr/bin/podman", "--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs")
+POLICY = runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "container-policy.py"))
+PODMAN = POLICY["PODMAN"]
 # Fixed per-profile image, ACP adapter and state volume. Nothing here comes
 # from the client; the project path is taken from the connecting process's
 # working directory and validated (see resolve_project).
@@ -53,6 +55,9 @@ PROFILES = {
 }
 # Writable home shared by both agents: toolchains they install, build caches.
 HOME_VOLUME = "agent-home"
+VM_SOCKET_TARGET = "/opt/agent-vm"
+VM_CLIENT_TARGET = "/opt/agent-vm-client.py"
+VM_CLIENT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-vm-client.py")
 HOME_DIR = "/home/node"
 # Mount targets pre-created in the images (their root filesystem is read-only).
 GIT_CONFIG_TARGET = "/opt/agent-git/gitconfig"   # GIT_CONFIG_GLOBAL in the images
@@ -452,17 +457,14 @@ def resolve_project(pid, git_root):
 
 
 def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None,
-                android_sdk=None, instructions=None, known_hosts=None, memory=None):
+                android_sdk=None, instructions=None, known_hosts=None, memory=None, vm_socket_dir=None):
     """The one command a connection may run: a fresh container with ~/Git
     read-only, the connection's project read-write, the shared agent home
     and the profile's state. Optional host resources are mounted read-only,
     except the SSH agent socket and the shared memory."""
     p = PROFILES[profile]
-    argv = [*PODMAN, "run", "--rm", "--interactive", "--detach-keys=", f"--name={name}",
-            f"--label=acp-connector.profile={profile}", "--pull=never", "--log-driver=none",
-            "--userns=keep-id:uid=1000,gid=1000", "--user=1000:1000",
-            "--read-only", "--read-only-tmpfs=true", "--cap-drop=all",
-            "--security-opt=no-new-privileges", "--security-opt=label=disable", "--pids-limit=4096",
+    argv = [*POLICY["run_argv"](interactive=True), "--detach-keys=", f"--name={name}",
+            f"--label=acp-connector.profile={profile}",
             f"--mount=type=volume,src={HOME_VOLUME},dst={HOME_DIR}",
             f"--mount=type=volume,src={p['volume']},dst={p['state']}",
             f"--mount=type=bind,src={git_root},dst={git_root},ro=true",
@@ -483,17 +485,23 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
                  f"--env=GIT_SSH_COMMAND={GIT_SSH_COMMAND}"]
     if memory:
         argv.append(f"--mount=type=bind,src={memory},dst={MEMORY_TARGET}")
+    if vm_socket_dir:
+        argv += [f"--mount=type=bind,src={vm_socket_dir},dst={VM_SOCKET_TARGET},ro=true",
+                 f"--mount=type=bind,src={VM_CLIENT},dst={VM_CLIENT_TARGET},ro=true"]
     return argv + [p["image"], p["entry"]]
 
 
 def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
-                    known_hosts=None, memory=None):
+                    known_hosts=None, memory=None, vm_socket_dir=None):
     def launch(project, name):
         agent = ssh_agent if ssh_agent and os.path.exists(ssh_agent) else None
         if ssh_agent and not agent:
             log(f"SSH agent socket {ssh_agent} missing; starting without commit signing")
+        vm = vm_socket_dir if vm_socket_dir and os.path.isdir(vm_socket_dir) and os.path.isfile(VM_CLIENT) else None
+        if vm_socket_dir and not vm:
+            log("VM activation resources missing; starting without VM activation")
         return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
-                            known_hosts, memory),
+                            known_hosts, memory, vm),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
 
@@ -542,8 +550,8 @@ class Broker:
     def peer_pid(self, writer, tag):
         sock = writer.get_extra_info("socket")
         try:
-            creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            pid, uid, _ = struct.unpack("3i", creds)
+            creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII"))
+            pid, uid, _ = struct.unpack("iII", creds)
         except OSError as exc:
             log(f"[{tag}] refused: cannot read peer credentials ({exc})")
             return None
@@ -761,6 +769,7 @@ def main():
     ap.add_argument("--instructions", help="environment notes for the agents (AGENTS.md/CLAUDE.md), read-only")
     ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
     ap.add_argument("--memory", help="notes directory shared by all agents, mounted read-write at ~/memory")
+    ap.add_argument("--vm-socket-dir", help="dedicated VM activation socket directory, mounted read-only")
     ap.add_argument("--max-connections", type=int, default=DEFAULT_MAX_CONNECTIONS,
                     help=f"maximum concurrent connections per agent (default: {DEFAULT_MAX_CONNECTIONS})")
     ap.add_argument("--socket", help="listen here instead of using systemd socket activation")
@@ -771,7 +780,7 @@ def main():
     for opt, path in (("--git-root", git_root), ("--git-config", args.git_config),
                       ("--ssh-agent-socket", args.ssh_agent_socket), ("--android-sdk", args.android_sdk),
                       ("--instructions", args.instructions), ("--known-hosts", args.known_hosts),
-                      ("--memory", args.memory)):
+                      ("--memory", args.memory), ("--vm-socket-dir", args.vm_socket_dir)):
         if path is not None and not mount_safe(path):
             ap.error(f"{opt} must be an absolute, normalized path without ',' or '='")
     if not os.path.isdir(git_root):
@@ -783,6 +792,10 @@ def main():
     for opt, path in (("--android-sdk", args.android_sdk), ("--memory", args.memory)):
         if path and not os.path.isdir(path):
             ap.error(f"{opt} must be an existing directory")
+    if args.vm_socket_dir and os.path.exists(args.vm_socket_dir) and not os.path.isdir(args.vm_socket_dir):
+        ap.error("--vm-socket-dir must name a directory")
+    if args.vm_socket_dir and not mount_safe(VM_CLIENT):
+        ap.error("VM activation client path cannot be mounted safely")
     sock = activated_socket()
     owns_path = sock is None
     if owns_path:
@@ -790,7 +803,7 @@ def main():
             ap.error("no socket-activation fd; use the systemd socket unit or pass --socket")
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
-                               args.android_sdk, args.instructions, args.known_hosts, args.memory)
+                               args.android_sdk, args.instructions, args.known_hosts, args.memory, args.vm_socket_dir)
     asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
                       max_connections=args.max_connections))
 

@@ -4,17 +4,31 @@
 #   ./install.sh               everything
 #   ./install.sh --no-build    skip the image builds (after editing only the broker)
 #   ./install.sh --no-test     skip the smoke tests
+#   ./install.sh --agent-vm   enable the installed VM helper
 # Safe to re-run; acp-connector/install.sh alone only reinstalls the host files.
 set -eu
 
-build=1 test=1
-for arg in "$@"; do
-    case $arg in
+build=1 test=1 agent_vm=0
+while [ "$#" -gt 0 ]; do
+    case $1 in
         --no-build) build=0 ;;
         --no-test) test=0 ;;
-        *) echo "usage: $0 [--no-build] [--no-test]" >&2; exit 2 ;;
+        --agent-vm) agent_vm=1 ;;
+        --vm-socket-dir)
+            if [ "$#" -lt 2 ] || [ "$2" != /run/acp-agent-vm ]; then
+                echo "usage: $0 [--no-build] [--no-test] [--agent-vm]" >&2; exit 2
+            fi
+            agent_vm=1  # Compatibility with the original setup command.
+            shift ;;
+        *) echo "usage: $0 [--no-build] [--no-test] [--agent-vm]" >&2; exit 2 ;;
     esac
+    shift
 done
+
+if [ "$agent_vm" = 1 ] && [ ! -d /run/acp-agent-vm ]; then
+    echo "Install the VM helper first; /run/acp-agent-vm must exist" >&2
+    exit 2
+fi
 
 if [ -e /.flatpak-info ]; then
     echo "Run this in a host terminal, not inside a Flatpak." >&2
@@ -32,7 +46,11 @@ if [ "$build" = 1 ]; then
 fi
 
 echo "== Installing connectors"
-"$src/acp-connector/install.sh"
+if [ "$agent_vm" = 1 ]; then
+    "$src/acp-connector/install.sh" --agent-vm
+else
+    "$src/acp-connector/install.sh"
+fi
 
 echo "== Enabling sockets"
 systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket

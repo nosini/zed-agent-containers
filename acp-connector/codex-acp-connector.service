@@ -9,7 +9,7 @@ After=codex-agent-state-volume.service agent-home-volume.service
 [Service]
 Type=simple
 # Optional: ACP_BROKER_OPTS="--git-config F --ssh-agent-socket S --android-sdk D --instructions F
-#   --known-hosts F --memory D --max-connections N"
+#   --known-hosts F --memory D --vm-socket-dir D --max-connections N"
 EnvironmentFile=-%h/.config/acp-connector/broker.env
 # Installed outside ~/Git so project files can't change host code.
 # Each Zed connection gets a fresh container: ~/Git read-only, the project

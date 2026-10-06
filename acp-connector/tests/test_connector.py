@@ -501,6 +501,8 @@ class ActivationTest(BrokerTest):
         open(known_hosts, "w").close()
         memory = os.path.join(self.tmp, "agent-memory", "notes")
         os.makedirs(memory)
+        vm_sockets = os.path.join(self.tmp, "vm-sockets")
+        os.makedirs(vm_sockets)
         with socket.socket(socket.AF_UNIX) as s:
             s.bind(agent_sock)
         for profile, image, entry, state, notes_dst in (
@@ -511,7 +513,7 @@ class ActivationTest(BrokerTest):
                     os.unlink(self.sock)
                 self.start_broker(profile, "--git-config", gitconfig, "--ssh-agent-socket", agent_sock,
                                   "--android-sdk", sdk, "--instructions", notes, "--known-hosts", known_hosts,
-                                  "--memory", memory)
+                                  "--memory", memory, "--vm-socket-dir", vm_sockets)
                 self.addCleanup(self.stop, self.broker)
                 resp = self.zed().initialize()
                 line = next(l for l in self.broker_text().splitlines() if "agent: /usr/bin/podman" in l)
@@ -538,7 +540,12 @@ class ActivationTest(BrokerTest):
                     f"--mount=type=bind,src={gitconfig},dst=/opt/agent-git/gitconfig,ro=true",
                     f"--mount=type=bind,src={known_hosts},dst=/opt/agent-git/known_hosts,ro=true",
                     f"--mount=type=bind,src={agent_sock},dst=/opt/agent-git/ssh-agent.sock",
-                    f"--mount=type=bind,src={memory},dst=/home/node/memory"]))
+                    f"--mount=type=bind,src={memory},dst=/home/node/memory",
+                    f"--mount=type=bind,src={vm_sockets},dst=/opt/agent-vm,ro=true",
+                    "--mount=type=bind,src=" + os.path.abspath(os.path.join(HERE, "..", "agent-vm-client.py"))
+                    + ",dst=/opt/agent-vm-client.py,ro=true"]))
+                # The directory mount survives socket replacement and grants
+                # no filesystem writes or access to libvirt's control API.
                 self.assertEqual(argv[-2:], [f"localhost/{image}:local", entry])
                 self.broker.terminate()
                 self.broker.wait(20)
@@ -559,6 +566,8 @@ class ActivationTest(BrokerTest):
                       ["--profile", "codex", "--known-hosts", os.path.join(self.tmp, "missing")],
                       ["--profile", "codex", "--memory", os.path.join(self.tmp, "missing")],
                       ["--profile", "codex", "--memory", self.git + "/a=b"],
+                      ["--profile", "codex", "--vm-socket-dir", os.path.abspath(HARNESS)],
+                      ["--profile", "codex", "--vm-socket-dir", self.git + "/a,b"],
                       ["--profile", "codex", "--max-connections", "0"],
                       ["--profile", "codex", "--max-connections", "-1"],
                       ["--profile", "codex", "--max-connections", "many"]):
@@ -566,6 +575,16 @@ class ActivationTest(BrokerTest):
                                 *extra], capture_output=True, timeout=20)
             self.assertEqual(p.returncode, 2, extra)
         self.assertFalse(os.path.exists(self.sock))
+
+    def test_missing_optional_vm_directory_does_not_stop_broker(self):
+        missing = os.path.join(self.tmp, "missing-vm")
+        self.start_broker("codex", "--vm-socket-dir", missing)
+        self.zed().initialize()
+        self.assertIsNone(self.broker.poll())
+        lines = self.broker_text().splitlines()
+        self.assertTrue(any("starting without VM activation" in line for line in lines))
+        argv = next(line for line in lines if "agent: /usr/bin/podman" in line)
+        self.assertNotIn("dst=/opt/agent-vm", argv)
 
 
 @unittest.skipUnless(os.path.exists(CODEX_ACP_JS) and shutil.which("node"), "codex-acp not available")

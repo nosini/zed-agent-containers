@@ -6,6 +6,24 @@
 # last is updated from the repo only while you haven't edited it.
 set -eu
 
+agent_vm=0
+vm_socket_dir=/run/acp-agent-vm
+if [ "$#" -gt 0 ]; then
+    if [ "$#" -eq 1 ] && [ "$1" = --agent-vm ]; then
+        agent_vm=1
+    elif [ "$#" -eq 2 ] && [ "$1" = --vm-socket-dir ] && [ "$2" = "$vm_socket_dir" ]; then
+        agent_vm=1  # Compatibility with the original setup command.
+    else
+        echo "usage: $0 [--agent-vm]" >&2
+        exit 2
+    fi
+    # This is the dedicated helper directory, never a libvirt control socket.
+    if [ ! -d "$vm_socket_dir" ]; then
+        echo "Install the VM helper first; $vm_socket_dir must exist" >&2
+        exit 2
+    fi
+fi
+
 if [ -e /.flatpak-info ]; then
     echo "Run this in a host terminal, not inside a Flatpak." >&2
     exit 1
@@ -18,6 +36,13 @@ units=$config/systemd/user
 quadlets=$config/containers/systemd
 settings=$config/acp-connector
 client=$HOME/.var/app/dev.zed.Zed/data/acp-connector
+
+if [ "$agent_vm" = 1 ]; then
+    # A failed profile setup leaves installed broker code, configuration and
+    # running services intact. The full installer builds the image first.
+    python3 -I "$src/container-policy.py" configure-vm \
+        --client "$src/agent-vm-client.py" --sockets "$vm_socket_dir"
+fi
 
 # Earlier versions ran one long-lived container per agent (Quadlet .container).
 for agent in codex claude; do
@@ -32,6 +57,8 @@ rmdir "$HOME/.local/libexec/codex-acp-connector" \
       "$HOME/.var/app/dev.zed.Zed/data/codex-acp-connector" 2>/dev/null || true
 
 install -d -m 700 "$libexec" "$client" "$settings"
+install -m 555 "$src/container-policy.py" "$libexec/"
+install -m 555 "$src/agent-vm-client.py" "$libexec/"
 install -m 555 "$src/acp-broker.py" "$libexec/"
 install -m 755 "$src/acp-client.py" "$client/"
 install -d -m 755 "$units" "$quadlets"
@@ -150,6 +177,7 @@ add_opt() {
 }
 add_opt --instructions "$settings/agent-environment.md"
 add_opt --known-hosts "$settings/known_hosts"
+if [ "$agent_vm" = 1 ]; then add_opt --vm-socket-dir "$vm_socket_dir"; fi
 # Memory shared by all agents. Only notes/ is mounted (read-write, at
 # ~/memory); the git repository around it stays on the host, so the agents
 # can't change its hooks or config. Skipped once broker.env has --memory, so

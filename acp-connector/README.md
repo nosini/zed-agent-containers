@@ -71,6 +71,17 @@ refusal and configured limit appear in
 unexpected broker disconnect exits the client with status 1 and a log hint;
 closing the editor's input normally exits with status 0.
 
+## On-demand build/test VM
+
+An optional desktop helper can start a libvirt VM when an agent connects
+over SSH and shut it down after 15 idle minutes. Containers receive two
+Unix sockets for SSH and keep-awake holds; their dedicated SSH key and
+pinned guest host key still authenticate the connection. No additional
+LAN listener or libvirt control socket is exposed.
+
+See [VM setup and use](agent-vm.md) for installation, detached jobs and
+troubleshooting.
+
 ## Building and testing
 
 The agents run commands inside their container.
@@ -243,8 +254,8 @@ Zed entries: see `zed-settings.jsonc` (already added to your settings).
 
 ## Tested guarantees
 
-`python3 -m unittest -v tests/test_connector.py` (or
-`python3 tests/test_connector.py -v`) runs the connector tests. They pass inside Zed's
+`python3 -m unittest discover -s tests -p 'test_*.py' -v` runs the connector
+and VM relay tests. They pass inside Zed's
 Flatpak without Podman or host escape, and inside the agent containers
 (Python 3.11). The two real-adapter tests skip when that adapter isn't
 installed; each image has only its own. A fake Zed starts the
