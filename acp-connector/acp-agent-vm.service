@@ -1,18 +1,42 @@
 [Unit]
 Description=On-demand agent VM SSH relay
 Requires=acp-agent-vm.socket
-After=acp-agent-vm.socket
+Requires=virtqemud.socket
+After=acp-agent-vm.socket virtqemud.socket
 
 [Service]
 Type=simple
+User=acp-agent-vm
+Group=acp-agent-vm
 ExecStart=/usr/bin/python3 -I /usr/local/libexec/acp-agent-vm/agent-vm-server.py
+RuntimeDirectory=acp-agent-vm-private
+RuntimeDirectoryMode=0700
+BindReadOnlyPaths=/run/libvirt/virtqemud-sock:/run/acp-agent-vm-private/libvirt.sock
+InaccessiblePaths=-/run/libvirt -/run/dbus -/run/systemd -/run/user -/var/lib/libvirt -/etc/libvirt
 StateDirectory=acp-agent-vm
 StateDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET
+MemoryMax=256M
+TasksMax=64
+CPUQuota=100%
 Restart=on-failure
 RestartSec=5

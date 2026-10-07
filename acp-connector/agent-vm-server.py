@@ -14,6 +14,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import pwd
 import socket
 import stat
 import struct
@@ -24,6 +25,7 @@ SOCKET_DIR = "/run/acp-agent-vm"
 MAX_CONNECTIONS = 64
 MAX_CONTROL_CONNECTIONS = 16
 MAX_HOLDS = 64
+LIBVIRT_URI = "qemu+unix:///system?socket=/run/acp-agent-vm-private/libvirt.sock"
 
 
 class Domain:
@@ -35,7 +37,7 @@ class Domain:
         self.uuid = domain_uuid
 
     def call(self, operation):
-        with contextlib.closing(self.libvirt.open("qemu:///system")) as conn:
+        with contextlib.closing(self.libvirt.open(LIBVIRT_URI)) as conn:
             domain = conn.lookupByUUIDString(self.uuid)
             if operation == "state":
                 return domain.state()[0], domain.ID()
@@ -384,6 +386,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--config", default="/etc/acp-agent-vm.json")
     args = parser.parse_args()
+    if os.geteuid() == 0 or os.geteuid() != pwd.getpwnam("acp-agent-vm").pw_uid:
+        parser.error("run through the service as the dedicated acp-agent-vm account")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     asyncio.run(serve(load_config(args.config), activated_sockets()))
 

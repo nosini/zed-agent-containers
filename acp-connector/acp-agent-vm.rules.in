@@ -1,0 +1,32 @@
+// Managed by install-agent-vm.py. Libvirt ACL must be enabled in virtqemud.
+// https://libvirt.org/aclpolkit.html
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "acp-agent-vm") {
+        // Preserve the former unrestricted API policy for existing QEMU
+        // clients only when migrating a daemon with no per-operation ACL.
+        // Its existing socket authentication remains the admission check.
+        if (@LEGACY_ACCESS@ && action.id.indexOf("org.libvirt.api.") === 0 &&
+            action.lookup("connect_driver") === "QEMU") {
+            return polkit.Result.YES;
+        }
+        return;
+    }
+    if (action.id === "org.libvirt.unix.manage") {
+        return polkit.Result.YES;
+    }
+    if (action.id.indexOf("org.libvirt.api.") !== 0) {
+        return polkit.Result.NO;
+    }
+    if (action.lookup("connect_driver") !== "QEMU") {
+        return polkit.Result.NO;
+    }
+    if (action.id === "org.libvirt.api.connect.getattr") {
+        return polkit.Result.YES;
+    }
+    if (action.lookup("domain_uuid") === @DOMAIN_UUID@ &&
+        ["org.libvirt.api.domain.getattr", "org.libvirt.api.domain.read",
+         "org.libvirt.api.domain.start", "org.libvirt.api.domain.init-control"].indexOf(action.id) !== -1) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NO;
+});

@@ -29,6 +29,7 @@ The desktop needs Python 3 with the distribution's libvirt bindings.
 Use the package matching `/usr/bin/python3`; openSUSE uses names such as
 `python313-libvirt-python` for Python 3.13. Virtual Machine Manager
 commonly installs the bindings already.
+The helper uses the modular `virtqemud` daemon and a running polkit service.
 
 From a host terminal in this repository, substitute the existing VM name
 and guest IPv4 address:
@@ -39,14 +40,26 @@ sudo python3 acp-connector/install-agent-vm.py \
 ./install.sh --agent-vm
 ```
 
-The first command installs a root-owned configuration fixing one domain
-UUID and one SSH endpoint. It enables only a Unix socket unit. The second
+The first command creates a dedicated `acp-agent-vm` system account,
+installs a root-owned configuration fixing one domain UUID and one SSH
+endpoint, and enables a Unix socket unit. The helper runs without root or
+Linux capabilities. Its sockets remain accessible to the specified
+desktop account. The second
 rebuilds both images, installs and tests the connectors, mounts the
 dedicated socket directory and read-only client into new containers and
 adds `ProxyCommand` and a longer connection timeout to the existing VM
 SSH profile. Authentication settings and host keys are preserved. The
 socket files are accessible only to the specified desktop account; the
 directory is root-owned and mounted read-only in containers.
+
+On the first migration from libvirt's default unrestricted API policy,
+the installer enables polkit ACLs and restarts `virtqemud`. Existing QEMU
+clients keep their prior API access behind the existing socket
+authentication. An already configured polkit ACL retains its existing
+policy for other accounts. The installer backs up the original daemon
+configuration and verifies actual permissions as the helper account;
+failed verification restores the previous configuration and rule before
+enabling the helper. Unrecognized ACL configurations require manual setup.
 
 VM profile setup runs before installed broker files or settings change.
 If setup fails, fix the reported problem and rerun the command; the
@@ -77,6 +90,44 @@ ssh -F ~/.ssh/agent-vm.conf agent-vm 'hostname; sudo -n true'
 Keep the VM's DHCP reservation and the SSH profile aligned with the helper
 address. A moved/recreated guest must still pass the existing host-key pin.
 The container images do not need additional packages for this feature.
+
+## Host permissions
+
+The service account has no login shell, home or supplementary groups.
+Libvirt permits it to read the configured VM's state, start that existing
+VM, and request normal shutdown or reboot. It denies changing VM
+definitions, accessing another VM, reading secure XML, and forcing power
+off. The helper itself requests only graceful idle shutdown.
+
+The service sees one private bind of the QEMU socket. Other libvirt
+sockets, host D-Bus and systemd sockets, desktop homes and libvirt's
+configuration/storage directories are hidden. The private QEMU bind is
+outside the directory mounted into agent containers. The service has no
+Linux capabilities and has limits on memory, tasks and CPU usage. Its
+IP traffic is restricted to the configured guest IPv4 address using
+systemd's cgroup BPF filtering; this depends on kernel support.
+
+The host must route this connection directly to the guest. A transparent
+proxy can redirect packets to loopback, where the service's IP filter
+blocks them. With Mihomo TUN routing, add the guest's `/32` to the existing
+`tun.route-exclude-address` list and reload the proxy configuration:
+
+```yaml
+tun:
+  route-exclude-address:
+    - 192.0.2.2/32
+```
+
+Keep the existing TUN options and exclusions. If the host has a VPN kill
+switch, its direct-destination allow list must also cover that address,
+in its saved configuration as well as the running rules; otherwise the
+connection times out again after the kill switch is reloaded.
+Setting a proxy rule to `DIRECT` can still send the connection through
+the local proxy; the TUN routing exclusion avoids that interception.
+
+Connecting to the relay can start the configured VM and keep it awake.
+It does not select another VM, destination or host command. SSH still
+performs its own authentication and pinned host-key verification.
 
 ## Keep detached jobs awake
 
@@ -135,7 +186,7 @@ container starts, the broker skips those mounts and keeps ordinary agent
 work available. Once the helper is restored, reconnect the agent to get
 VM access; existing containers do not acquire mounts dynamically.
 
-To update the root helper, finish/check jobs and release their holds,
+To update the host helper, finish/check jobs and release their holds,
 close relayed SSH sessions, then run:
 
 ```sh
