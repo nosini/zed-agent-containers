@@ -1,5 +1,5 @@
 # Official Node 22 bookworm-slim, pinned to the manifest verified during setup.
-FROM docker.io/library/node:22-bookworm-slim@sha256:25330af3531fb5e23318554a0aa911125b6e91b1b777edf7655501d207c067a2
+FROM docker.io/library/node:22-bookworm-slim@sha256:efd0ab5780c2d9ab1f0f869571a00d5edb17793bff4cce4a2792e3eb0ffc7562
 
 USER root
 # Keep this step identical in both agent images so the layer is shared.
