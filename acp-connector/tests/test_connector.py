@@ -503,6 +503,7 @@ class ActivationTest(BrokerTest):
         os.makedirs(memory)
         vm_sockets = os.path.join(self.tmp, "vm-sockets")
         os.makedirs(vm_sockets)
+        other = os.path.join(self.git, "other")
         with socket.socket(socket.AF_UNIX) as s:
             s.bind(agent_sock)
         for profile, image, entry, state, notes_dst in (
@@ -513,7 +514,8 @@ class ActivationTest(BrokerTest):
                     os.unlink(self.sock)
                 self.start_broker(profile, "--git-config", gitconfig, "--ssh-agent-socket", agent_sock,
                                   "--android-sdk", sdk, "--instructions", notes, "--known-hosts", known_hosts,
-                                  "--memory", memory, "--vm-socket-dir", vm_sockets)
+                                  "--memory", memory, "--vm-socket-dir", vm_sockets,
+                                  "--writable", other, "--writable", other, "--writable", self.root)
                 self.addCleanup(self.stop, self.broker)
                 resp = self.zed().initialize()
                 line = next(l for l in self.broker_text().splitlines() if "agent: /usr/bin/podman" in l)
@@ -537,6 +539,7 @@ class ActivationTest(BrokerTest):
                     f"--mount=type=bind,src={notes},dst={notes_dst},ro=true",
                     f"--mount=type=bind,src={self.git},dst={self.git},ro=true",
                     f"--mount=type=bind,src={self.root},dst={self.root}",
+                    f"--mount=type=bind,src={other},dst={other}",
                     f"--mount=type=bind,src={gitconfig},dst=/opt/agent-git/gitconfig,ro=true",
                     f"--mount=type=bind,src={known_hosts},dst=/opt/agent-git/known_hosts,ro=true",
                     f"--mount=type=bind,src={agent_sock},dst=/opt/agent-git/ssh-agent.sock",
@@ -559,6 +562,7 @@ class ActivationTest(BrokerTest):
 
     def test_profile_is_required_and_fixed(self):
         broker = os.path.join(HERE, "..", "acp-broker.py")
+        os.symlink(self.root, os.path.join(self.git, "link"))
         for extra in ([], ["--profile", "other"], ["--profile", "/bin/sh"],
                       ["--profile", "codex", "--android-sdk", os.path.join(self.tmp, "missing")],
                       ["--profile", "codex", "--android-sdk", self.git + "/a,b"],
@@ -568,6 +572,11 @@ class ActivationTest(BrokerTest):
                       ["--profile", "codex", "--memory", self.git + "/a=b"],
                       ["--profile", "codex", "--vm-socket-dir", os.path.abspath(HARNESS)],
                       ["--profile", "codex", "--vm-socket-dir", self.git + "/a,b"],
+                      ["--profile", "codex", "--writable", self.git],
+                      ["--profile", "codex", "--writable", self.tmp],
+                      ["--profile", "codex", "--writable", os.path.join(self.git, "missing")],
+                      ["--profile", "codex", "--writable", os.path.join(self.git, "link")],
+                      ["--profile", "codex", "--writable", os.path.join(self.git, "other", "..", "project")],
                       ["--profile", "codex", "--max-connections", "0"],
                       ["--profile", "codex", "--max-connections", "-1"],
                       ["--profile", "codex", "--max-connections", "many"]):
@@ -585,6 +594,17 @@ class ActivationTest(BrokerTest):
         self.assertTrue(any("starting without VM activation" in line for line in lines))
         argv = next(line for line in lines if "agent: /usr/bin/podman" in line)
         self.assertNotIn("dst=/opt/agent-vm", argv)
+
+    def test_removed_writable_folder_is_skipped(self):
+        gone = os.path.join(self.git, "gone")
+        os.makedirs(gone)
+        self.start_broker("codex", "--writable", gone)
+        os.rmdir(gone)
+        self.zed().initialize()
+        lines = self.broker_text().splitlines()
+        self.assertTrue(any(f"writable folder {gone} is no longer" in line for line in lines))
+        argv = next(line for line in lines if "agent: /usr/bin/podman" in line)
+        self.assertNotIn(f"dst={gone}", argv)
 
 
 @unittest.skipUnless(os.path.exists(CODEX_ACP_JS) and shutil.which("node"), "codex-acp not available")

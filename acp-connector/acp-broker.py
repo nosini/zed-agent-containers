@@ -457,11 +457,12 @@ def resolve_project(pid, git_root):
 
 
 def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None,
-                android_sdk=None, instructions=None, known_hosts=None, memory=None, vm_socket_dir=None):
+                android_sdk=None, instructions=None, known_hosts=None, memory=None, vm_socket_dir=None,
+                writable=()):
     """The one command a connection may run: a fresh container with ~/Git
-    read-only, the connection's project read-write, the shared agent home
-    and the profile's state. Optional host resources are mounted read-only,
-    except the SSH agent socket and the shared memory."""
+    read-only, the connection's project and any writable folders read-write,
+    the shared agent home and the profile's state. Optional host resources
+    are mounted read-only, except the SSH agent socket and the shared memory."""
     p = PROFILES[profile]
     argv = [*POLICY["run_argv"](interactive=True), "--detach-keys=", f"--name={name}",
             f"--label=acp-connector.profile={profile}",
@@ -470,6 +471,11 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
             f"--mount=type=bind,src={git_root},dst={git_root},ro=true",
             f"--mount=type=bind,src={project},dst={project}",
             f"--workdir={project}"]
+    # Folders inside ~/Git every agent may write to. One the project already
+    # covers is not mounted twice.
+    for path in writable:
+        if not Policy.within(path, project):
+            argv.append(f"--mount=type=bind,src={path},dst={path}")
     if gitconfig:
         argv.append(f"--mount=type=bind,src={gitconfig},dst={GIT_CONFIG_TARGET},ro=true")
     if ssh_agent:
@@ -492,8 +498,12 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
 
 
 def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
-                    known_hosts=None, memory=None, vm_socket_dir=None):
+                    known_hosts=None, memory=None, vm_socket_dir=None, writable=()):
     def launch(project, name):
+        present = [w for w in writable if os.path.isdir(w) and os.path.realpath(w) == w]
+        for w in writable:
+            if w not in present:
+                log(f"writable folder {w} is no longer a real directory; starting without it")
         agent = ssh_agent if ssh_agent and os.path.exists(ssh_agent) else None
         if ssh_agent and not agent:
             log(f"SSH agent socket {ssh_agent} missing; starting without commit signing")
@@ -501,7 +511,7 @@ def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_s
         if vm_socket_dir and not vm:
             log("VM activation resources missing; starting without VM activation")
         return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
-                            known_hosts, memory, vm),
+                            known_hosts, memory, vm, present),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
 
@@ -770,6 +780,8 @@ def main():
     ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
     ap.add_argument("--memory", help="notes directory shared by all agents, mounted read-write at ~/memory")
     ap.add_argument("--vm-socket-dir", help="dedicated VM activation socket directory, mounted read-only")
+    ap.add_argument("--writable", action="append", default=[], metavar="DIR",
+                    help="directory inside the git root mounted read-write for every connection (repeatable)")
     ap.add_argument("--max-connections", type=int, default=DEFAULT_MAX_CONNECTIONS,
                     help=f"maximum concurrent connections per agent (default: {DEFAULT_MAX_CONNECTIONS})")
     ap.add_argument("--socket", help="listen here instead of using systemd socket activation")
@@ -794,6 +806,14 @@ def main():
             ap.error(f"{opt} must be an existing directory")
     if args.vm_socket_dir and os.path.exists(args.vm_socket_dir) and not os.path.isdir(args.vm_socket_dir):
         ap.error("--vm-socket-dir must name a directory")
+    writable = []
+    for path in args.writable:
+        if not (mount_safe(path) and path.startswith(git_root + "/") and os.path.isdir(path)
+                and os.path.realpath(path) == path):
+            ap.error(f"--writable {path}: must be an existing directory strictly inside {git_root},"
+                     " given by its real path without ',' or '='")
+        if path not in writable:
+            writable.append(path)
     if args.vm_socket_dir and not mount_safe(VM_CLIENT):
         ap.error("VM activation client path cannot be mounted safely")
     sock = activated_socket()
@@ -803,7 +823,8 @@ def main():
             ap.error("no socket-activation fd; use the systemd socket unit or pass --socket")
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
-                               args.android_sdk, args.instructions, args.known_hosts, args.memory, args.vm_socket_dir)
+                               args.android_sdk, args.instructions, args.known_hosts, args.memory, args.vm_socket_dir,
+                               writable)
     asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
                       max_connections=args.max_connections))
 

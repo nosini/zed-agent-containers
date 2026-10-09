@@ -7,6 +7,7 @@ Zed, that agent gets:
 | | Access |
 |---|---|
 | the project the thread was opened on | read-write, including `.git` |
+| folders in `~/Git` you list with `--writable` | read-write, all agents and projects |
 | everything else in `~/Git` | read-only |
 | `~/Android/Sdk` | read-only |
 | the rest of your home (`~/.ssh`, `~/.config`, …), D-Bus, Podman socket | none |
@@ -57,6 +58,14 @@ one container.
   is when Zed closes it or the broker restarts. Only then do the threads
   pick up a rebuilt image. The broker also removes leftovers from a crash
   when it starts.
+- **Writable folders:** to let every agent write to a folder in `~/Git`
+  besides its own project, add e.g. `--writable /home/you/Git/notes` inside
+  `ACP_BROKER_OPTS` in `~/.config/acp-connector/broker.env` (repeat the
+  option for more folders), then restart both broker services. Use the
+  folder's full, real path; the broker refuses `~/Git` itself, symlinks and
+  anything outside `~/Git`. The folder is mounted at the same path, so its
+  `.git` is writable too: an agent can change its hooks and config, which
+  run the next time you use git there.
 - **Connection limit:** each agent's broker allows 16 concurrent connections
   by default. Open projects can keep connections alive even while their
   threads are idle. To change the limit, add e.g. `--max-connections 32` inside
