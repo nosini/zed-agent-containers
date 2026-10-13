@@ -311,13 +311,16 @@ socket to the broker:
 
 - **Verified on the host** (`tests/host-smoke-test.py`, both agents, all
   passing): images with build tools and Java, per-connection containers
-  with the expected mounts, project rw / rest of `~/Git` ro, writable agent
-  home, no host home, git identity, SSH agent forwarding, refusal of
+  with the expected mounts, project and configured shared folders rw /
+  rest of `~/Git` ro, writable agent home, no host home, git identity,
+  SSH agent forwarding, refusal of
   `~/Git` itself, and container removal. Signing through Bitwarden was
   verified by hand (`git verify-commit`). Actual Android/Gradle, Rust or Go
   builds have not been tried yet.
-  `tests/host-smoke-test.py` checks all of these. If reading the client's
-  directory fails on your host, connections are refused; they never fall
+  `tests/host-smoke-test.py` checks all of these. Its mount check reads
+  `--writable` from the running broker; unconfigured mounts still fail.
+  If reading the client's directory fails on your host, connections are
+  refused; they never fall
   back to something broader.
 - **An agent's first thread on a project starts about 1–3 s slower,**
   because each connection starts a container.
