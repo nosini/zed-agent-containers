@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "rea": {
+      "type": "stdio",
+      "command": "ssh",
+      "args": [
+        "-T",
+        "-F",
+        "/home/node/.ssh/agent-vm.conf",
+        "agent-vm",
+        "/usr/local/bin/rea",
+        "mcp"
+      ],
+      "timeout": 1200000
+    }
+  }
+}

@@ -2,3 +2,16 @@
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
 cli_auth_credentials_store = "file"
+
+[mcp_servers.rea]
+command = "ssh"
+args = [
+  "-T",
+  "-F",
+  "/home/node/.ssh/agent-vm.conf",
+  "agent-vm",
+  "/usr/local/bin/rea",
+  "mcp",
+]
+startup_timeout_sec = 600
+tool_timeout_sec = 1200

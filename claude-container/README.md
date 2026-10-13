@@ -56,3 +56,23 @@ offers makes Zed run a command, and the connector blocks that.
 
 Claude Code applies project `.claude/settings.json` (including hooks) and
 `.mcp.json` from the open repo. They run inside the container.
+
+The image seeds `.claude.json` with a user-wide REA MCP server over SSH
+stdio. It runs `/usr/local/bin/rea mcp` on the VM, using the shared REA,
+Ghidra and Java installation described in [the Codex README](../codex-container/README.md).
+The selected executable must be present on the VM, and the connector must
+mount the VM activation sockets. `MCP_TIMEOUT=600000` allows ten minutes
+for startup, including a VM cold boot; REA's tool timeout is twenty minutes.
+
+Rebuilding seeds new state volumes only. For an existing volume, merge the
+`mcpServers.rea` entry from `claude.json` into
+`/home/node/.claude/.claude.json`, preserving account and trust settings,
+then restart the Claude agent. You can register the entry from a host
+terminal after rebuilding:
+
+```sh
+podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm \
+  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
+  claude-agent-acp --cli mcp add-json --scope user rea \
+  '{"type":"stdio","command":"ssh","args":["-T","-F","/home/node/.ssh/agent-vm.conf","agent-vm","/usr/local/bin/rea","mcp"],"timeout":1200000}'
+```

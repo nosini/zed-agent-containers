@@ -57,3 +57,15 @@ podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm -it 
 (`danger-full-access`, `approval_policy = "never"`), because Podman provides
 the isolation. The container still can't write outside the open project
 and its state.
+
+The config also registers REA over SSH stdio through `/usr/local/bin/rea`
+on the VM. This launcher runs REA from `/usr/local/lib/rea` and sets
+`GHIDRA_INSTALL_DIR=/usr/local/share/ghidra` and
+`JAVA_HOME=/usr/lib64/jvm/java-21-openjdk`; SSH keeps stdout available for
+MCP messages. These shared installations are independent of project work
+directories. The selected executable must be present on the VM for REA to
+analyze it. The VM activation sockets must be mounted
+by the connector, and the Codex agent must be restarted to load the tools.
+Because the state volume is seeded only once, rebuilding the image does not
+update an existing volume's `config.toml`; merge the `[mcp_servers.rea]`
+entry from the image config into an existing volume when upgrading.

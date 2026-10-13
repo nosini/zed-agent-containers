@@ -29,6 +29,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
     HOME=/home/node \
     CLAUDE_CONFIG_DIR=/home/node/.claude \
+    MCP_TIMEOUT=600000 \
     DISABLE_AUTOUPDATER=1 \
     DISABLE_TELEMETRY=1 \
     NO_BROWSER=1 \
@@ -43,7 +44,8 @@ RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
 RUN mkdir -p /home/node/.claude /workspace \
  && chown node:node /home/node/.claude
 COPY settings.json /home/node/.claude/settings.json
-RUN chown node:node /home/node/.claude/settings.json
+COPY claude.json /home/node/.claude/.claude.json
+RUN chown node:node /home/node/.claude/settings.json /home/node/.claude/.claude.json
 USER node
 WORKDIR /workspace
 ENTRYPOINT []
