@@ -25,6 +25,8 @@ limitations.
   `keep-id`.
 - `/opt/agent-git/` holds mount targets for the connector's gitconfig
   (`GIT_CONFIG_GLOBAL`) and SSH agent socket.
+- The Word and Excel MCP servers from [`../office-mcp`](../office-mcp/README.md),
+  in venvs under `/opt/office-mcp`, registered in the seeded `config.toml`.
 
 Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 
@@ -33,7 +35,7 @@ Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 ```sh
 cd ~/Git/zed-agent-containers/codex-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
-  build -t localhost/codex-agent:local .
+  build --build-context office-mcp=../office-mcp -t localhost/codex-agent:local .
 ```
 
 The explicit storage option works around this host's unavailable kernel
@@ -71,3 +73,16 @@ by the connector, and the Codex agent must be restarted to load the tools.
 Because the state volume is seeded only once, rebuilding the image does not
 update an existing volume's `config.toml`; merge the `[mcp_servers.rea]`
 entry from the image config into an existing volume when upgrading.
+
+The config also registers the Word and Excel MCP servers, `docx-mcp` and
+`excel` (see [`../office-mcp`](../office-mcp/README.md)), which run inside
+the container. To add them to an existing volume after rebuilding, run
+this from a host terminal, then restart the Codex agent:
+
+```sh
+P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
+$P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v codex-agent-state:/home/node/.codex localhost/codex-agent:local sh -c '
+  codex mcp add docx-mcp -- /opt/office-mcp/docx/bin/python3 -m docx_mcp.server &&
+  codex mcp add excel -- /opt/office-mcp/excel/bin/excel-mcp-server stdio'
+```

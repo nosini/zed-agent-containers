@@ -20,6 +20,7 @@ The host escape feature in Zed is not needed.
 | `acp-connector/` | Host broker (ACP policy, per-project `podman run`), Zed-side client, systemd units, `install.sh`, tests. **Start here.** |
 | `codex-container/` | Codex image: `@openai/codex` + `codex-acp`, pinned |
 | `claude-container/` | Claude Code image: `claude-agent-acp` + native CLI, pinned |
+| `office-mcp/` | Word and Excel MCP servers in both images: hash-pinned Python dependencies and `lock.py` |
 
 Quick start, from a host terminal:
 
@@ -34,15 +35,15 @@ the container READMEs). The steps it runs:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
-(cd codex-container && $P build -t localhost/codex-agent:local .)
-(cd claude-container && $P build -t localhost/claude-agent:local .)
+(cd codex-container && $P build --build-context office-mcp=../office-mcp -t localhost/codex-agent:local .)
+(cd claude-container && $P build --build-context office-mcp=../office-mcp -t localhost/claude-agent:local .)
 acp-connector/install.sh
 systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket
 acp-connector/tests/host-smoke-test.py codex && acp-connector/tests/host-smoke-test.py claude
 ```
 
 To update the agents, run `./update.sh` from a host terminal. It moves the
-pinned npm packages to their newest releases that are at least 3 days old
+pinned npm packages and the Word and Excel MCP servers to their newest releases that are at least 3 days old
 (`--min-age=N` to change that, `0` for the latest), so a compromised
 release has time to be caught before you pin it. It also moves the Node
 base image digest to the latest and rebuilds both images without cache,

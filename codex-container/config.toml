@@ -15,3 +15,13 @@ args = [
 ]
 startup_timeout_sec = 600
 tool_timeout_sec = 1200
+
+# Word and Excel files, from the venvs in the image. Running the module
+# skips docx-mcp's install of a Claude Code skill into ~/.claude.
+[mcp_servers.docx-mcp]
+command = "/opt/office-mcp/docx/bin/python3"
+args = ["-m", "docx_mcp.server"]
+
+[mcp_servers.excel]
+command = "/opt/office-mcp/excel/bin/excel-mcp-server"
+args = ["stdio"]

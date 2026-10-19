@@ -11,6 +11,10 @@ directly on the user's machine.
   packages. Installed: Node 22 + npm, Python 3.11 (`venv`, `pip`), gcc/make
   (`build-essential`, `pkg-config`, `libssl-dev`), OpenJDK 17, git, curl,
   ripgrep, zip/unzip/xz, flatpak-builder, rpmbuild, Meson, Ninja, jsdom.
+- The `docx-mcp` and `excel` MCP servers run in this container. Use them to
+  read and edit Word (`.docx`) and Excel (`.xlsx`, `.xlsm`) files; they see
+  the same files you do. docx-mcp's `scrub_pii` and PDF export are not
+  available (no spaCy, no LibreOffice).
 - Your home, `/home/node`, is writable and persists between sessions. It's
   shared with the other agent.
   - Keep each project's temporary files, reviews, logs, source copies,

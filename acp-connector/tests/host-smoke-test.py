@@ -141,6 +141,9 @@ def main():
                          "&& test -r /opt/agent-vm-client.py").returncode == 0)
         tools = inside("gcc --version && java -version && python3 -m venv --help && npm --version")
         check("build tools present (gcc, java, venv, npm)", tools.returncode == 0, tools.stderr[-200:])
+        office = inside("/opt/office-mcp/docx/bin/python3 -I -c 'import docx_mcp.server' "
+                        "&& /opt/office-mcp/excel/bin/excel-mcp-server --help >/dev/null")
+        check("Word and Excel MCP servers load", office.returncode == 0, office.stderr[-200:])
         check("host home not visible", inside(f"! ls -d {HOME}/.ssh {HOME}/.config /run/user/*/bus 2>/dev/null").returncode == 0)
         ident = inside(f"git -C '{project}' config user.name").stdout.strip()
         check("git identity configured", bool(ident), "no user.name; see ~/.config/acp-connector/gitconfig")

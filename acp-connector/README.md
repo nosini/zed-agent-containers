@@ -226,8 +226,8 @@ is faster:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
-(cd ~/Git/zed-agent-containers/codex-container && $P build -t localhost/codex-agent:local .)
-(cd ~/Git/zed-agent-containers/claude-container && $P build -t localhost/claude-agent:local .)
+(cd ~/Git/zed-agent-containers/codex-container && $P build --build-context office-mcp=../office-mcp -t localhost/codex-agent:local .)
+(cd ~/Git/zed-agent-containers/claude-container && $P build --build-context office-mcp=../office-mcp -t localhost/claude-agent:local .)
 ```
 
 Install. This also migrates the earlier long-lived containers; their state

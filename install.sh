@@ -41,7 +41,8 @@ podman="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
 if [ "$build" = 1 ]; then
     for agent in codex claude; do
         echo "== Building localhost/$agent-agent:local"
-        (cd "$src/$agent-container" && $podman build -t "localhost/$agent-agent:local" .)
+        (cd "$src/$agent-container" && $podman build \
+            --build-context office-mcp="$src/office-mcp" -t "localhost/$agent-agent:local" .)
     done
 fi
 

@@ -28,13 +28,15 @@ ACP policy, tests and limitations.
   switch modes per session in Zed.
 - `/opt/agent-git/` holds mount targets for the connector's gitconfig and
   SSH agent socket.
+- The Word and Excel MCP servers from [`../office-mcp`](../office-mcp/README.md),
+  in venvs under `/opt/office-mcp`, registered in the seeded `.claude.json`.
 
 ## Build (host terminal)
 
 ```sh
 cd ~/Git/zed-agent-containers/claude-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
-  build -t localhost/claude-agent:local .
+  build --build-context office-mcp=../office-mcp -t localhost/claude-agent:local .
 ```
 
 ## State and login
@@ -87,4 +89,21 @@ podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm \
   -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
   claude-agent-acp --cli mcp add-json --scope user rea \
   '{"type":"stdio","command":"ssh","args":["-T","-F","/home/node/.ssh/agent-vm.conf","agent-vm","/usr/local/bin/rea","mcp"],"timeout":1200000}'
+```
+
+The seeded `.claude.json` also registers the Word and Excel MCP servers,
+`docx-mcp` and `excel` (see [`../office-mcp`](../office-mcp/README.md)).
+They run inside the container. To add them to an existing volume after
+rebuilding, run this from a host terminal, then restart the Claude agent:
+
+```sh
+P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
+$P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
+  claude-agent-acp --cli mcp add-json --scope user docx-mcp \
+  '{"type":"stdio","command":"/opt/office-mcp/docx/bin/docx-mcp-server","args":[]}'
+$P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
+  claude-agent-acp --cli mcp add-json --scope user excel \
+  '{"type":"stdio","command":"/opt/office-mcp/excel/bin/excel-mcp-server","args":["stdio"]}'
 ```

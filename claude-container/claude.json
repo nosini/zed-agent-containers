@@ -12,6 +12,18 @@
         "mcp"
       ],
       "timeout": 1200000
+    },
+    "docx-mcp": {
+      "type": "stdio",
+      "command": "/opt/office-mcp/docx/bin/docx-mcp-server",
+      "args": []
+    },
+    "excel": {
+      "type": "stdio",
+      "command": "/opt/office-mcp/excel/bin/excel-mcp-server",
+      "args": [
+        "stdio"
+      ]
     }
   }
 }

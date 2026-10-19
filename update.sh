@@ -1,15 +1,18 @@
 #!/bin/sh
-# Update the agent images: move the pinned npm packages to their newest
-# releases that are at least 3 days old, and the Node base image digest to
-# the latest, then rebuild both images without cache so the Debian
-# packages are refreshed too. Run from a HOST terminal.
+# Update the agent images: move the pinned npm packages and the Word and
+# Excel MCP servers (PyPI) to their newest releases that are at least 3 days
+# old, and the Node base image digest to the latest, then rebuild both
+# images without cache so the Debian packages are refreshed too. Run from a
+# HOST terminal, after a first ./install.sh: the MCP servers are locked with
+# the Python in the Codex image.
 #   ./update.sh               bump the pins, rebuild, run the smoke tests
 #   ./update.sh --check       only show pinned, latest and chosen versions
 #   ./update.sh --no-build    only bump the pins
 #   ./update.sh --min-age=N   releases must be N days old (0: take the latest)
 # The waiting period skips releases too new to have been checked by anyone,
 # which is how compromised npm releases are usually caught. It applies to
-# the other npm dependencies too (npm --before). Pins are never downgraded.
+# the other npm and Python dependencies too (npm --before, pip
+# --uploaded-prior-to). Pins are never downgraded.
 # The base image and Debian packages are not delayed: they carry security
 # fixes. Nothing is committed: review `git diff` and commit the new pins. With
 # nothing new to pin, this still rebuilds, which refreshes the Debian
@@ -79,11 +82,39 @@ chosen = max(ok + [pinned], key=key)
 print(chosen, latest, times[chosen])' "$cutoff" "$2"
 }
 
+# pypi_pinned <file> <package>: the version locked in office-mcp/<file>.
+pypi_pinned() {
+    sed -n "s/^$2==\([^ ]*\) .*/\1/p" "$src/office-mcp/$1"
+}
+
+# pypi_pick <package> <pinned>: as pick, from PyPI. A release counts as
+# published when its last file was uploaded; yanked files are ignored.
+pypi_pick() {
+    python3 -I -c 'import json, sys, urllib.request
+package, cutoff, pinned = sys.argv[1:]
+with urllib.request.urlopen(f"https://pypi.org/pypi/{package}/json", timeout=60) as r:
+    data = json.load(r)
+latest = data["info"]["version"]
+times = {v: max(f["upload_time_iso_8601"] for f in files)
+         for v, files in data["releases"].items()
+         if files and not any(f["yanked"] for f in files)}
+def key(v):
+    return tuple(int(p) for p in v.split("."))
+def stable(v):
+    return all(p.isdigit() for p in v.split("."))
+ok = [v for v, t in times.items() if stable(v) and t <= cutoff and key(v) <= key(latest)]
+chosen = max(ok + [pinned], key=key)
+print(chosen, latest, times[chosen])' "$1" "$cutoff" "$2"
+}
+
 codex_pick=$(pick @openai/codex "$(pinned codex-container @openai/codex)")
 codex_acp_pick=$(pick @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)")
 claude_acp_pick=$(pick @agentclientprotocol/claude-agent-acp \
     "$(pinned claude-container @agentclientprotocol/claude-agent-acp)")
 codex=${codex_pick%% *} codex_acp=${codex_acp_pick%% *} claude_acp=${claude_acp_pick%% *}
+docx_pick=$(pypi_pick docx-mcp-server "$(pypi_pinned docx.txt docx-mcp-server)")
+excel_pick=$(pypi_pick excel-mcp-server "$(pypi_pinned excel.txt excel-mcp-server)")
+docx=${docx_pick%% *} excel=${excel_pick%% *}
 $podman pull -q "$base" >/dev/null
 digest=$($podman image inspect --format '{{.Digest}}' "$base")
 case $digest in
@@ -94,17 +125,25 @@ current=$(sed -n "s|^FROM $base@||p" "$src/codex-container/Containerfile")
 
 echo "Releases published before $cutoff ($min_age days ago) are eligible."
 echo "Package                               pinned        latest        chosen"
-row() {  # row <package> <dir> <pick output>
-    set -- "$1" "$(pinned "$2" "$1")" $3
+row() {  # row <package> <pinned> <pick output>
+    set -- "$1" "$2" $3
     printf '%-37s %-13s %-13s %s\n' "$1" "$2" "$4" "$3"
 }
-row @openai/codex codex-container "$codex_pick"
-row @agentclientprotocol/codex-acp codex-container "$codex_acp_pick"
-row @agentclientprotocol/claude-agent-acp claude-container "$claude_acp_pick"
+row @openai/codex "$(pinned codex-container @openai/codex)" "$codex_pick"
+row @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)" "$codex_acp_pick"
+row @agentclientprotocol/claude-agent-acp "$(pinned claude-container @agentclientprotocol/claude-agent-acp)" \
+    "$claude_acp_pick"
+row "docx-mcp-server (PyPI)" "$(pypi_pinned docx.txt docx-mcp-server)" "$docx_pick"
+row "excel-mcp-server (PyPI)" "$(pypi_pinned excel.txt excel-mcp-server)" "$excel_pick"
 echo "$base"
 echo "  pinned $current"
 echo "  latest $digest"
 [ "$check" = 0 ] || exit 0
+# The MCP servers are locked in the Codex image, below.
+if ! $podman image exists localhost/codex-agent:local; then
+    echo "localhost/codex-agent:local is missing; run ./install.sh first." >&2
+    exit 1
+fi
 
 # codex-acp declares a narrow @openai/codex range; the override pins the
 # latest Codex anyway, as before.
@@ -130,6 +169,16 @@ for image_dir in codex-container claude-container; do
     npm_in "$src/$image_dir" update --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
     sed -i "s|^FROM $base@sha256:[0-9a-f]*|FROM $base@$digest|" "$src/$image_dir/Containerfile"
 done
+# The MCP servers' dependencies, hash-pinned for the images' Python 3.11, by
+# office-mcp/lock.py in the current Codex image (with the same user mapping
+# as the broker, so it can write the lock files).
+step="locking the MCP servers"
+office_before=$(later "$(later "$cutoff" "${docx_pick##* }")" "${excel_pick##* }")
+[ "$min_age" = 0 ] && office_before=
+$podman run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 --security-opt=label=disable \
+    -v "$src/office-mcp:/w" localhost/codex-agent:local \
+    python3 -I /w/lock.py ${office_before:+--cutoff=$office_before} \
+    "docx-mcp-server==$docx" "excel-mcp-server==$excel"
 # No pager: waiting in less, or leaving it with Ctrl-C, would stop the builds.
 git -C "$src" --no-pager diff --stat
 
@@ -138,10 +187,12 @@ if [ "$build" = 1 ]; then
     # Debian layer, which keeps that layer shared between the images.
     step="building localhost/codex-agent:local"
     echo "== Building localhost/codex-agent:local"
-    (cd "$src/codex-container" && $podman build --no-cache -t localhost/codex-agent:local .)
+    (cd "$src/codex-container" && $podman build --no-cache \
+        --build-context office-mcp="$src/office-mcp" -t localhost/codex-agent:local .)
     step="building localhost/claude-agent:local"
     echo "== Building localhost/claude-agent:local"
-    (cd "$src/claude-container" && $podman build -t localhost/claude-agent:local .)
+    (cd "$src/claude-container" && $podman build \
+        --build-context office-mcp="$src/office-mcp" -t localhost/claude-agent:local .)
     step="running the smoke tests"
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex

@@ -17,6 +17,18 @@ RUN mkdir -p /usr/share/man/man1 \
       flatpak-builder rpm \
  && rm -rf /var/lib/apt/lists/*
 
+# The Word and Excel MCP servers, each in its own venv (docx-mcp needs the
+# mcp 1.x API, excel-mcp-server 2.x), from the hash-pinned wheels in
+# ../office-mcp (build with --build-context office-mcp=../office-mcp).
+# Also identical in both images, so this layer is shared too.
+COPY --from=office-mcp docx.txt excel.txt /opt/office-mcp/
+RUN for server in docx excel; do \
+      python3 -m venv /opt/office-mcp/$server \
+      && /opt/office-mcp/$server/bin/pip install --no-cache-dir --disable-pip-version-check \
+           --no-deps --require-hashes --only-binary=:all: -r /opt/office-mcp/$server.txt \
+      || exit 1; \
+    done
+
 WORKDIR /opt/agent
 COPY package.json package-lock.json ./
 # The native Claude CLI ships as a locked optional dependency; no scripts run.
