@@ -43,12 +43,23 @@ The `claude-agent-state` volume is mounted at `/home/node/.claude`, and
 `CLAUDE_CONFIG_DIR` points there, so `.claude.json` (account, trust) lives
 in the volume too. Testing showed Claude writes only there and to `/tmp`,
 never to the read-only `HOME`. Your host `~/.claude` is not mounted. Log in
-with a one-off container:
+with a one-off container using the broker's user mapping, so it can read
+and update the private credential file in the existing volume:
 
 ```sh
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm -it \
+  --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
   claude-agent-acp --cli auth login --claudeai      # or --console
+```
+
+Check that the login persists in a fresh container:
+
+```sh
+podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm \
+  --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
+  claude-agent-acp --cli auth status
 ```
 
 Login isn't possible from Zed's panel. Every login method the adapter
@@ -72,6 +83,7 @@ terminal after rebuilding:
 
 ```sh
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm \
+  --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
   claude-agent-acp --cli mcp add-json --scope user rea \
   '{"type":"stdio","command":"ssh","args":["-T","-F","/home/node/.ssh/agent-vm.conf","agent-vm","/usr/local/bin/rea","mcp"],"timeout":1200000}'

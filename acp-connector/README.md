@@ -240,11 +240,15 @@ systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.so
 tests/host-smoke-test.py codex && tests/host-smoke-test.py claude
 ```
 
-If you still need to log in, use a one-off container with the state volume:
+If you still need to log in, use a one-off container with the state volume
+and the broker's user mapping. The mapping lets it read and update private
+state files created by the agent:
 
 ```sh
-$P run --rm -it -v codex-agent-state:/home/node/.codex localhost/codex-agent:local codex login --device-auth
-$P run --rm -it -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
+$P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v codex-agent-state:/home/node/.codex localhost/codex-agent:local codex login --device-auth
+$P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
   claude-agent-acp --cli auth login --claudeai
 ```
 

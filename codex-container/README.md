@@ -46,10 +46,12 @@ The `codex-agent-state` volume (`codex-agent-state.volume`, installed by
 the connector) is mounted at `/home/node/.codex`. It holds the
 configuration, your login and history. It is initialized from the image on
 first use; rebuilding does not overwrite an existing volume. Log in with a
-one-off container:
+one-off container using the broker's user mapping, so it can read and
+update the private state files in the existing volume:
 
 ```sh
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm -it \
+  --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   -v codex-agent-state:/home/node/.codex localhost/codex-agent:local codex login --device-auth
 ```
 
