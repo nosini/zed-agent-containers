@@ -3,10 +3,9 @@
 You run inside a rootless Podman container started for this project, not
 directly on the user's machine.
 
-- The project you were started in is read-write. The rest of the user's
-  `~/Git` is mounted read-only at the same path, except folders the user
-  made writable for every agent. Nothing else of the user's home exists
-  here.
+- You start in the project you were opened on. All of the user's `~/Git`
+  is mounted read-write at the same path; change other repositories only
+  when the task calls for it. Nothing else of the user's home exists here.
 - You are uid 1000 (`node`) without sudo; you cannot install system
   packages. Installed: Node 22 + npm, Python 3.11 (`venv`, `pip`), gcc/make
   (`build-essential`, `pkg-config`, `libssl-dev`), OpenJDK 17, git, curl,

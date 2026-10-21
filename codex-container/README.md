@@ -2,7 +2,7 @@
 
 A locally built image for Codex. The connector in `../acp-connector/`
 starts one container per Zed connection, which all Codex threads on a
-project share, with `~/Git` read-only and the open project read-write. See that README for setup, the ACP policy, tests and
+project share, with all of `~/Git` read-write. See that README for setup, the ACP policy, tests and
 limitations.
 
 ## Image

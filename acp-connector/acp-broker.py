@@ -5,7 +5,7 @@ Runs on the host as a systemd user service, one instance per profile. It
 accepts connections on a dedicated Unix socket inside Zed's Flatpak runtime
 directory. For each connection it starts a fresh container of the profile's
 fixed image and ACP adapter (`podman run --rm`), with the git root mounted
-read-only and the connection's project mounted read-write, and relays ACP
+read-write and the connection's project as working directory, and relays ACP
 (newline-delimited JSON-RPC 2.0) through an allowlist policy:
 
 * The profile is fixed by the host unit. The project is the connecting
@@ -479,24 +479,18 @@ def resolve_project(pid, git_root):
 
 def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None,
                 android_sdk=None, instructions=None, known_hosts=None, memory=None, vm_socket_dir=None,
-                writable=(), teams_socket=None):
+                teams_socket=None):
     """The one command a connection may run: a fresh container with ~/Git
-    read-only, the connection's project and any writable folders read-write,
-    the shared agent home and the profile's state. Optional host resources
-    are mounted read-only, except the SSH agent socket and the shared memory."""
+    read-write, working in the connection's project, the shared agent home and
+    the profile's state. Optional host resources are mounted read-only, except
+    the SSH agent socket and the shared memory."""
     p = PROFILES[profile]
     argv = [*POLICY["run_argv"](interactive=True), "--detach-keys=", f"--name={name}",
             f"--label=acp-connector.profile={profile}",
             f"--mount=type=volume,src={HOME_VOLUME},dst={HOME_DIR}",
             f"--mount=type=volume,src={p['volume']},dst={p['state']}",
-            f"--mount=type=bind,src={git_root},dst={git_root},ro=true",
-            f"--mount=type=bind,src={project},dst={project}",
+            f"--mount=type=bind,src={git_root},dst={git_root}",
             f"--workdir={project}"]
-    # Folders inside ~/Git every agent may write to. One the project already
-    # covers is not mounted twice.
-    for path in writable:
-        if not Policy.within(path, project):
-            argv.append(f"--mount=type=bind,src={path},dst={path}")
     if gitconfig:
         argv.append(f"--mount=type=bind,src={gitconfig},dst={GIT_CONFIG_TARGET},ro=true")
     if ssh_agent:
@@ -522,12 +516,8 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
 
 
 def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
-                    known_hosts=None, memory=None, vm_socket_dir=None, writable=(), teams_socket=None):
+                    known_hosts=None, memory=None, vm_socket_dir=None, teams_socket=None):
     def launch(project, name):
-        present = [w for w in writable if os.path.isdir(w) and os.path.realpath(w) == w]
-        for w in writable:
-            if w not in present:
-                log(f"writable folder {w} is no longer a real directory; starting without it")
         agent = ssh_agent if ssh_agent and os.path.exists(ssh_agent) else None
         if ssh_agent and not agent:
             log(f"SSH agent socket {ssh_agent} missing; starting without commit signing")
@@ -548,7 +538,7 @@ def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_s
             if not os.path.isfile(TEAMS_RELAY):
                 raise LaunchRefused(f"Teams MCP relay {TEAMS_RELAY} is missing; reinstall the connectors")
         return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
-                            known_hosts, memory, vm, present, teams_socket),
+                            known_hosts, memory, vm, teams_socket),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
 
@@ -815,7 +805,7 @@ def main():
     ap.add_argument("--profile", required=True, choices=sorted(PROFILES),
                     help="which fixed image and ACP adapter to run")
     ap.add_argument("--git-root", required=True,
-                    help="mounted read-only; projects inside it are mounted read-write per connection")
+                    help="mounted read-write; connections must open a project inside it")
     ap.add_argument("--git-config", help="gitconfig for the agents (identity, signing), mounted read-only")
     ap.add_argument("--ssh-agent-socket", help="SSH agent socket forwarded for commit signing")
     ap.add_argument("--android-sdk", help="Android SDK directory, mounted read-only at the same path")
@@ -825,8 +815,9 @@ def main():
     ap.add_argument("--vm-socket-dir", help="dedicated VM activation socket directory, mounted read-only")
     ap.add_argument("--teams-socket", help="Teams for Linux MCP bridge socket, mounted read-only at "
                     f"{TEAMS_SOCKET_TARGET}; required by the Teams profiles, refused by the others")
-    ap.add_argument("--writable", action="append", default=[], metavar="DIR",
-                    help="directory inside the git root mounted read-write for every connection (repeatable)")
+    # Obsolete now that the whole git root is writable; accepted so an old
+    # broker.env still starts.
+    ap.add_argument("--writable", action="append", default=[], help=argparse.SUPPRESS)
     ap.add_argument("--max-connections", type=int, default=DEFAULT_MAX_CONNECTIONS,
                     help=f"maximum concurrent connections per agent (default: {DEFAULT_MAX_CONNECTIONS})")
     ap.add_argument("--socket", help="listen here instead of using systemd socket activation")
@@ -852,14 +843,8 @@ def main():
             ap.error(f"{opt} must be an existing directory")
     if args.vm_socket_dir and os.path.exists(args.vm_socket_dir) and not os.path.isdir(args.vm_socket_dir):
         ap.error("--vm-socket-dir must name a directory")
-    writable = []
-    for path in args.writable:
-        if not (mount_safe(path) and path.startswith(git_root + "/") and os.path.isdir(path)
-                and os.path.realpath(path) == path):
-            ap.error(f"--writable {path}: must be an existing directory strictly inside {git_root},"
-                     " given by its real path without ',' or '='")
-        if path not in writable:
-            writable.append(path)
+    if args.writable:
+        log("--writable is obsolete and ignored: all of the git root is writable; remove it from broker.env")
     if PROFILES[args.profile].get("teams"):
         if not args.teams_socket:
             ap.error(f"the {args.profile} profile needs --teams-socket"
@@ -879,7 +864,7 @@ def main():
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
                                args.android_sdk, args.instructions, args.known_hosts, args.memory, args.vm_socket_dir,
-                               writable, args.teams_socket)
+                               args.teams_socket)
     asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
                       max_connections=args.max_connections))
 

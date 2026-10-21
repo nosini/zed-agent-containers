@@ -2,8 +2,8 @@
 
 The Claude Code counterpart of `../codex-container`. The connector in
 `../acp-connector/` starts one container per Zed connection, which all
-Claude threads on a project share, with `~/Git` read-only and the open
-project read-write. See that README for setup, the
+Claude threads on a project share, with all of `~/Git`
+read-write. See that README for setup, the
 ACP policy, tests and limitations.
 
 ## Image

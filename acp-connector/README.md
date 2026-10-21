@@ -6,9 +6,7 @@ Zed, that agent gets:
 
 | | Access |
 |---|---|
-| the project the thread was opened on | read-write, including `.git` |
-| folders in `~/Git` you list with `--writable` | read-write, all agents and projects |
-| everything else in `~/Git` | read-only |
+| all of `~/Git`, starting in the project the thread was opened on | read-write, including `.git` |
 | `~/Android/Sdk` | read-only |
 | the rest of your home (`~/.ssh`, `~/.config`, …), D-Bus, Podman socket | none |
 | its own state volume (login, settings, history) | read-write |
@@ -24,7 +22,7 @@ Flatpak host escape.
 ```
 Zed Flatpak (cwd = project)          host (systemd --user)                       per connection
 acp-client.py                   ──►  $XDG_RUNTIME_DIR/app/dev.zed.Zed/       ──►  podman run --rm -i
- ACP_CONNECTOR=codex|claude           codex-acp.sock  → acp-broker --profile codex   ~/Git:ro, <project>:rw,
+ ACP_CONNECTOR=codex|claude           codex-acp.sock  → acp-broker --profile codex   ~/Git:rw, cwd=<project>,
  (stdio ↔ socket, no policy)          claude-acp.sock → acp-broker --profile claude  agent-home, <agent>-agent-state
 ```
 
@@ -58,14 +56,11 @@ one container.
   is when Zed closes it or the broker restarts. Only then do the threads
   pick up a rebuilt image. The broker also removes leftovers from a crash
   when it starts.
-- **Writable folders:** to let every agent write to a folder in `~/Git`
-  besides its own project, add e.g. `--writable /home/you/Git/notes` inside
-  `ACP_BROKER_OPTS` in `~/.config/acp-connector/broker.env` (repeat the
-  option for more folders), then restart both broker services. Use the
-  folder's full, real path; the broker refuses `~/Git` itself, symlinks and
-  anything outside `~/Git`. The folder is mounted at the same path, so its
-  `.git` is writable too: an agent can change its hooks and config, which
-  run the next time you use git there.
+- **`~/Git` is writable:** the whole folder is mounted read-write at the
+  same path, so an agent can change any repository, including its `.git`
+  hooks and config, which run the next time you use git there. The old
+  `--writable` option is ignored (the broker logs a warning); remove it from
+  `broker.env`.
 - **Teams:** two extra agents, "Codex + Teams" and "Claude + Teams", give
   a thread Teams for Linux's MCP bridge; the normal agents never get it.
   Pick the agent in Zed per thread. Their own brokers (`codex-teams`,
@@ -207,7 +202,7 @@ going over SSH through `url.<ssh>.pushInsteadOf` rules.
   the agents to push only when asked.
 
 **Git worktrees:** a worktree whose main repository is another folder in
-`~/Git` can't commit from the container, because that folder is read-only.
+`~/Git` can commit from the container, since all of `~/Git` is writable.
 
 ## ACP policy (both agents, enforced on every message)
 
@@ -305,7 +300,7 @@ socket to the broker:
     refused project.
   - A session in a sibling project is rejected.
 - **Container command:** for both profiles, the exact `podman run` flags
-  and mount set are checked: `~/Git` ro, project rw, agent home, state
+  and mount set are checked: `~/Git` rw, agent home, state
   volume, and the optional gitconfig, Android SDK, environment note and
   push host keys (all ro, the last with its `GIT_SSH_COMMAND`), agent
   socket and shared memory. A missing or unknown profile, and a bad SDK,
@@ -330,30 +325,27 @@ socket to the broker:
 - **Real adapters, offline, throwaway state:** codex-acp 1.12.0 and
   claude-agent-acp 0.81.2 both complete the handshake through the policy.
 - **Mutation checks:** disabling the git-root check, the path-character
-  check, the read-only flag on `~/Git`, or the session-directory check each
-  makes the suite fail.
+  check, or the session-directory check each makes the suite fail.
 
 ## Not tested here / remaining limitations
 
 - **Verified on the host** (`tests/host-smoke-test.py`, both agents, all
   passing): images with build tools and Java, per-connection containers
-  with the expected mounts, project and configured shared folders rw /
-  rest of `~/Git` ro, writable agent home, no host home, git identity,
+  with the expected mounts, `~/Git` rw, writable agent home, no host home, git identity,
   SSH agent forwarding, refusal of
   `~/Git` itself, and container removal. Signing through Bitwarden was
   verified by hand (`git verify-commit`). Actual Android/Gradle, Rust or Go
   builds have not been tried yet.
-  `tests/host-smoke-test.py` checks all of these. Its mount check reads
-  `--writable` from the running broker; unconfigured mounts still fail.
+  `tests/host-smoke-test.py` checks all of these; unexpected mounts fail.
   If reading the client's directory fails on your host, connections are
   refused; they never fall
   back to something broader.
 - **An agent's first thread on a project starts about 1–3 s slower,**
   because each connection starts a container.
-- **The agents can change anything in the open project,** including `.git`
-  (hooks, config) and `.zed/settings.json`, which Zed acts on. They can read
-  every repo in `~/Git`, including any secrets in them, and the network is
-  open. This fits a "not malicious, maybe careless" threat model; review
+- **The agents can change anything in `~/Git`,** in every repository,
+  including `.git` (hooks, config) and `.zed/settings.json`, which Zed acts
+  on, and this repository's sources, which `install.sh` copies to the host.
+  They can read any secrets in `~/Git`, and the network is open. This fits a "not malicious, maybe careless" threat model; review
   `git diff` as usual.
 - **Displayed content is agent-controlled:** messages, links and diffs.
 - **UX cost of failing closed:** command output isn't streamed into tool

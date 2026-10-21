@@ -9,11 +9,11 @@ After=codex-agent-state-volume.service agent-home-volume.service
 [Service]
 Type=simple
 # Optional: ACP_BROKER_OPTS="--git-config F --ssh-agent-socket S --android-sdk D --instructions F
-#   --known-hosts F --memory D --vm-socket-dir D --writable D --max-connections N"
+#   --known-hosts F --memory D --vm-socket-dir D --max-connections N"
 EnvironmentFile=-%h/.config/acp-connector/broker.env
 # Installed outside ~/Git so project files can't change host code.
-# Each Zed connection gets a fresh container: ~/Git read-only, the project
-# Zed started the agent in read-write.
+# Each Zed connection gets a fresh container: ~/Git read-write, working in
+# the project Zed started the agent in.
 ExecStart=/usr/bin/python3 -I %h/.local/libexec/acp-connector/acp-broker.py --profile codex --git-root %h/Git $ACP_BROKER_OPTS
 UMask=0077
 Restart=on-failure

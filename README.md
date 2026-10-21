@@ -5,8 +5,9 @@ Each agent gets its own container for the project it's working on (Zed
 runs all of an agent's threads on a project over one connection, so they
 share that container):
 
-- the project it was opened on is read-write;
-- the rest of `~/Git` and the Android SDK are read-only;
+- all of `~/Git` is read-write, and it starts in the project it was
+  opened on;
+- the Android SDK is read-only;
 - nothing else from your home is visible;
 - a shared notes folder is read-write for both agents in every project,
   so they can keep memory across threads; it's a git repository on the

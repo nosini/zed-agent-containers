@@ -14,8 +14,8 @@ Type=simple
 EnvironmentFile=-%h/.config/acp-connector/broker.env
 EnvironmentFile=-%h/.config/acp-connector/teams.env
 # Installed outside ~/Git so project files can't change host code.
-# Each Zed connection gets a fresh container: ~/Git read-only, the project
-# Zed started the agent in read-write, and the Teams socket read-only.
+# Each Zed connection gets a fresh container: ~/Git read-write, working in
+# the project Zed started the agent in, and the Teams socket read-only.
 ExecStart=/usr/bin/python3 -I %h/.local/libexec/acp-connector/acp-broker.py --profile claude-teams --git-root %h/Git $ACP_BROKER_OPTS $ACP_TEAMS_OPTS
 UMask=0077
 Restart=on-failure

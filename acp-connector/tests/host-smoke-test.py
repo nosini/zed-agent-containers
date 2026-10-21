@@ -8,7 +8,6 @@ Needs no credentials and sends no model requests. It connects like Zed does
 container while it runs, and checks it is removed afterwards.
 """
 
-import argparse
 import json
 import os
 import subprocess
@@ -62,25 +61,6 @@ def containers(agent):
     return out.stdout.split()
 
 
-def broker_writable_mounts(agent, project):
-    """Read the writable-folder options that the running broker actually uses."""
-    result = sh("systemctl", "--user", "show", f"{agent}-acp-connector.service",
-                "--property=MainPID", "--value")
-    if result.returncode != 0:
-        raise RuntimeError("could not query the running broker")
-    pid = int(result.stdout.strip())
-    if pid <= 0:
-        raise RuntimeError("broker is not running")
-    with open(f"/proc/{pid}/cmdline", "rb") as stream:
-        argv = [os.fsdecode(arg) for arg in stream.read().split(b"\0") if arg]
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("--writable", action="append", default=[])
-    args, _ = parser.parse_known_args(argv)
-    return {f"{path}:true" for path in args.writable
-            if path.startswith(GIT + "/") and os.path.isdir(path) and os.path.realpath(path) == path
-            and os.path.commonpath((path, project)) != project}
-
-
 def main():
     if len(sys.argv) not in (2, 3) or sys.argv[1] not in AGENTS:
         sys.exit(__doc__)
@@ -110,25 +90,21 @@ def main():
         name = names[0]
         fmt = "{{range .Mounts}}{{.Destination}}:{{.RW}}{{println}}{{end}}"
         mounts = set(sh(*PODMAN, "inspect", name, "--format", fmt).stdout.split())
-        expected = {f"{GIT}:false", f"{project}:true", f"{state}:true", "/home/node:true"}
-        try:
-            expected.update(broker_writable_mounts(agent, project))
-            check("running broker writable-folder configuration readable", True)
-        except (OSError, ValueError, RuntimeError) as error:
-            check("running broker writable-folder configuration readable", False, str(error))
+        expected = {f"{GIT}:true", f"{state}:true", "/home/node:true"}
         optional = {"/opt/agent-git/gitconfig:false", "/opt/agent-git/ssh-agent.sock:true",
                     "/opt/agent-vm:false", "/opt/agent-vm-client.py:false",
                     "/opt/agent-git/known_hosts:false", "/home/node/memory:true",
                     f"{HOME}/Android/Sdk:false", f"{state}/{'AGENTS.md' if agent == 'codex' else 'CLAUDE.md'}:false"}
         extra = mounts - expected - optional
-        check("mounts: ~/Git ro, project and configured folders rw, agent home, state (+ optional extras)",
+        check("mounts: ~/Git rw, agent home, state (+ optional extras)",
               expected <= mounts and not extra, str(sorted(mounts)))
 
         def inside(cmd):
             return sh(*PODMAN, "exec", name, "sh", "-c", cmd)
         probe = os.path.join(project, ".acp-rw-probe")
         check("project is writable", inside(f"touch '{probe}' && rm '{probe}'").returncode == 0)
-        check("rest of ~/Git is read-only", inside(f"touch '{GIT}/.acp-ro-probe'").returncode != 0)
+        probe = os.path.join(GIT, ".acp-rw-probe")
+        check("rest of ~/Git is writable", inside(f"touch '{probe}' && rm '{probe}'").returncode == 0)
         check("agent home is writable", inside("touch ~/.acp-probe && rm ~/.acp-probe").returncode == 0)
         if "/home/node/memory:true" in mounts:
             check("shared memory is writable, its git repository not visible",
