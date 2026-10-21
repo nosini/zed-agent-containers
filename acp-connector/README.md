@@ -68,7 +68,7 @@ one container.
   `~/.config/acp-connector/teams.env` with the socket Teams reports:
 
   ```sh
-  printf 'ACP_TEAMS_OPTS="--teams-socket %s"\n' "$HOME/.config/Electron/mcp/bridge.sock" \
+  printf 'ACP_TEAMS_OPTS="--teams-socket %s"\n' "$HOME/.var/app/eu.nosini.TeamsOffice/config/teams-for-linux/mcp/bridge.sock" \
     > ~/.config/acp-connector/teams.env
   systemctl --user enable --now codex-teams-acp-connector.socket claude-teams-acp-connector.socket
   ```
@@ -81,8 +81,15 @@ one container.
   (`teams-mcp-relay.py`, mounted read-only). No agent configuration is
   needed. A Teams thread can use every tool the bridge offers. Start Teams
   first: without its socket the connection is refused, and a thread
-  opened before Teams restarts keeps the old socket until you start a new
-  one.
+  opened before Teams restarts keeps the old socket until its agent
+  container is recreated. After changing `teams.env` or restarting Teams,
+  restart the Teams brokers on the host, then reconnect the agent in Zed:
+
+  ```sh
+  systemctl --user restart codex-teams-acp-connector.service claude-teams-acp-connector.service
+  ```
+
+  A new thread on an existing connection still uses the same container.
 - **Connection limit:** each agent's broker allows 16 concurrent connections
   by default. Open projects can keep connections alive even while their
   threads are idle. To change the limit, add e.g. `--max-connections 32` inside
