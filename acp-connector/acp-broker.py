@@ -17,7 +17,8 @@ read-only and the connection's project mounted read-write, and relays ACP
   mcp/*, elicitation/*, extension (`_`-prefixed) and unknown methods are
   answered with an error by the broker and never reach Zed.
 * Zed -> agent: known methods only. Client capabilities are replaced with a
-  fixed "no fs, no terminal" set, forwarded MCP servers are removed, and
+  fixed "no fs, no terminal" set, forwarded MCP servers are replaced with
+  the profile's fixed list (empty, or Teams for the Teams profiles), and
   session cwd must lie inside the connection's project.
 * `_meta` extension data is removed in both directions, and the agent's
   advertised capabilities and auth methods are rewritten to a safe subset.
@@ -53,6 +54,11 @@ PROFILES = {
                "volume": "claude-agent-state", "state": "/home/node/.claude",
                "instructions": "/home/node/.claude/CLAUDE.md"},
 }
+# The same agents with Teams for Linux's MCP bridge. Separate profiles with
+# their own sockets, so Teams access is chosen per Zed thread (by picking the
+# agent) while the host alone decides what that agent gets.
+for _base, _label in (("codex", "Codex + Teams"), ("claude", "Claude + Teams")):
+    PROFILES[f"{_base}-teams"] = {**PROFILES[_base], "label": _label, "teams": True}
 # Writable home shared by both agents: toolchains they install, build caches.
 HOME_VOLUME = "agent-home"
 VM_SOCKET_TARGET = "/opt/agent-vm"
@@ -66,6 +72,15 @@ KNOWN_HOSTS_TARGET = "/opt/agent-git/known_hosts"
 # Notes shared by all agents across projects (read-write). The git repository
 # around it stays on the host, so the agents can't touch its hooks or config.
 MEMORY_TARGET = "/home/node/memory"
+# Teams profiles: Teams for Linux's MCP bridge socket and the relay the agents
+# run as a stdio MCP server. On the --read-only-tmpfs /run, so the images need
+# no mount targets.
+TEAMS_SOCKET_TARGET = "/run/teams-office.sock"
+TEAMS_RELAY_TARGET = "/run/teams-mcp-relay.py"
+TEAMS_RELAY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "teams-mcp-relay.py")
+# Added to every session a Teams profile opens (ACP stdio server).
+TEAMS_MCP_SERVER = {"name": "teams-office", "command": "/usr/bin/python3",
+                    "args": ["-I", TEAMS_RELAY_TARGET, TEAMS_SOCKET_TARGET], "env": []}
 # Git's SSH (pushes) trusts only the host keys from the host, never the
 # agent-writable ~/.ssh/known_hosts, and never adds keys on first use.
 GIT_SSH_COMMAND = f"ssh -o UserKnownHostsFile={KNOWN_HOSTS_TARGET} -o StrictHostKeyChecking=yes"
@@ -108,6 +123,10 @@ CLIENT_CAPABILITIES = {"fs": {"readTextFile": False, "writeTextFile": False}, "t
 
 class PolicyError(Exception):
     pass
+
+
+class LaunchRefused(Exception):
+    """A connection can't get its container; the message is shown in Zed."""
 
 
 def log(msg):
@@ -179,13 +198,15 @@ def pick_strings(obj, keys):
 class Policy:
     """Per-connection ACP filter. Returns messages to send in each direction."""
 
-    def __init__(self, project, git_root, tag, label=None):
+    def __init__(self, project, git_root, tag, label=None, mcp_servers=()):
         self.project = project      # session cwd must be inside this
         self.git_root = git_root    # locations/diffs shown to Zed must be inside this
         self.tag = tag
         # Zed shows every custom agent's threads with the same icon, so the
         # thread titles it displays carry the agent's name instead.
         self.title_prefix = f"[{label}] " if label else ""
+        # MCP servers the host gives every session, replacing Zed's.
+        self.mcp_servers = json.dumps(list(mcp_servers))
         self.client_pending = {}   # id key -> method, client requests awaiting the agent
         self.agent_pending = set()  # id keys of agent requests forwarded to Zed
 
@@ -264,7 +285,7 @@ class Policy:
             servers = params.get("mcpServers")
             if isinstance(servers, list) and servers:
                 self.note(f"removed {len(servers)} forwarded MCP server(s) from {method}")
-            params["mcpServers"] = []
+            params["mcpServers"] = json.loads(self.mcp_servers)
             if params.pop("additionalDirectories", None):
                 self.note(f"removed additionalDirectories from {method}")
         return params
@@ -458,7 +479,7 @@ def resolve_project(pid, git_root):
 
 def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None,
                 android_sdk=None, instructions=None, known_hosts=None, memory=None, vm_socket_dir=None,
-                writable=()):
+                writable=(), teams_socket=None):
     """The one command a connection may run: a fresh container with ~/Git
     read-only, the connection's project and any writable folders read-write,
     the shared agent home and the profile's state. Optional host resources
@@ -494,11 +515,14 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
     if vm_socket_dir:
         argv += [f"--mount=type=bind,src={vm_socket_dir},dst={VM_SOCKET_TARGET},ro=true",
                  f"--mount=type=bind,src={VM_CLIENT},dst={VM_CLIENT_TARGET},ro=true"]
+    if teams_socket:
+        argv += [f"--mount=type=bind,src={teams_socket},dst={TEAMS_SOCKET_TARGET},ro=true",
+                 f"--mount=type=bind,src={TEAMS_RELAY},dst={TEAMS_RELAY_TARGET},ro=true"]
     return argv + [p["image"], p["entry"]]
 
 
 def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
-                    known_hosts=None, memory=None, vm_socket_dir=None, writable=()):
+                    known_hosts=None, memory=None, vm_socket_dir=None, writable=(), teams_socket=None):
     def launch(project, name):
         present = [w for w in writable if os.path.isdir(w) and os.path.realpath(w) == w]
         for w in writable:
@@ -510,8 +534,21 @@ def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_s
         vm = vm_socket_dir if vm_socket_dir and os.path.isdir(vm_socket_dir) and os.path.isfile(VM_CLIENT) else None
         if vm_socket_dir and not vm:
             log("VM activation resources missing; starting without VM activation")
+        # A Teams thread without Teams is refused rather than started without
+        # it. A file bind pins the socket's inode: a container started before
+        # Teams (re)created it needs a new connection to see the new one.
+        if teams_socket:
+            try:
+                live = stat.S_ISSOCK(os.stat(teams_socket).st_mode)
+            except OSError:
+                live = False
+            if not live:
+                raise LaunchRefused(f"Teams MCP socket {teams_socket} is missing. "
+                                    "Start Teams, then start a new thread")
+            if not os.path.isfile(TEAMS_RELAY):
+                raise LaunchRefused(f"Teams MCP relay {TEAMS_RELAY} is missing; reinstall the connectors")
         return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
-                            known_hosts, memory, vm, present),
+                            known_hosts, memory, vm, present, teams_socket),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
 
@@ -583,8 +620,14 @@ class Broker:
             pass
 
     async def session(self, reader, writer, tag, project):
-        policy = Policy(project, self.git_root, tag, PROFILES.get(self.name, {}).get("label"))
-        argv, cleanup = self.launcher(project, f"{self.name}-agent-{os.getpid()}-{self.counter}")
+        profile = PROFILES.get(self.name, {})
+        policy = Policy(project, self.git_root, tag, profile.get("label"),
+                        [TEAMS_MCP_SERVER] if profile.get("teams") else ())
+        try:
+            argv, cleanup = self.launcher(project, f"{self.name}-agent-{os.getpid()}-{self.counter}")
+        except LaunchRefused as exc:
+            await self.refuse(reader, writer, tag, str(exc))
+            return
         log(f"[{tag}] project {project}; agent: {shlex.join(argv)}")
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -780,6 +823,8 @@ def main():
     ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
     ap.add_argument("--memory", help="notes directory shared by all agents, mounted read-write at ~/memory")
     ap.add_argument("--vm-socket-dir", help="dedicated VM activation socket directory, mounted read-only")
+    ap.add_argument("--teams-socket", help="Teams for Linux MCP bridge socket, mounted read-only at "
+                    f"{TEAMS_SOCKET_TARGET}; required by the Teams profiles, refused by the others")
     ap.add_argument("--writable", action="append", default=[], metavar="DIR",
                     help="directory inside the git root mounted read-write for every connection (repeatable)")
     ap.add_argument("--max-connections", type=int, default=DEFAULT_MAX_CONNECTIONS,
@@ -792,7 +837,8 @@ def main():
     for opt, path in (("--git-root", git_root), ("--git-config", args.git_config),
                       ("--ssh-agent-socket", args.ssh_agent_socket), ("--android-sdk", args.android_sdk),
                       ("--instructions", args.instructions), ("--known-hosts", args.known_hosts),
-                      ("--memory", args.memory), ("--vm-socket-dir", args.vm_socket_dir)):
+                      ("--memory", args.memory), ("--vm-socket-dir", args.vm_socket_dir),
+                      ("--teams-socket", args.teams_socket)):
         if path is not None and not mount_safe(path):
             ap.error(f"{opt} must be an absolute, normalized path without ',' or '='")
     if not os.path.isdir(git_root):
@@ -814,6 +860,15 @@ def main():
                      " given by its real path without ',' or '='")
         if path not in writable:
             writable.append(path)
+    if PROFILES[args.profile].get("teams"):
+        if not args.teams_socket:
+            ap.error(f"the {args.profile} profile needs --teams-socket"
+                     " (ACP_TEAMS_OPTS in ~/.config/acp-connector/teams.env)")
+        if not mount_safe(TEAMS_RELAY):
+            ap.error("Teams MCP relay path cannot be mounted safely")
+    elif args.teams_socket:
+        ap.error(f"--teams-socket is only for the Teams profiles, not {args.profile};"
+                 " put it in ~/.config/acp-connector/teams.env, not broker.env")
     if args.vm_socket_dir and not mount_safe(VM_CLIENT):
         ap.error("VM activation client path cannot be mounted safely")
     sock = activated_socket()
@@ -824,7 +879,7 @@ def main():
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
                                args.android_sdk, args.instructions, args.known_hosts, args.memory, args.vm_socket_dir,
-                               writable)
+                               writable, args.teams_socket)
     asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
                       max_connections=args.max_connections))
 

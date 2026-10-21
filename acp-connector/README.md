@@ -66,6 +66,28 @@ one container.
   anything outside `~/Git`. The folder is mounted at the same path, so its
   `.git` is writable too: an agent can change its hooks and config, which
   run the next time you use git there.
+- **Teams:** two extra agents, "Codex + Teams" and "Claude + Teams", give
+  a thread Teams for Linux's MCP bridge; the normal agents never get it.
+  Pick the agent in Zed per thread. Their own brokers (`codex-teams`,
+  `claude-teams`) read `broker.env` like the others, plus
+  `~/.config/acp-connector/teams.env` with the socket Teams reports:
+
+  ```sh
+  printf 'ACP_TEAMS_OPTS="--teams-socket %s"\n' "$HOME/.config/Electron/mcp/bridge.sock" \
+    > ~/.config/acp-connector/teams.env
+  systemctl --user enable --now codex-teams-acp-connector.socket claude-teams-acp-connector.socket
+  ```
+
+  Then add the two Teams entries from `zed-settings.jsonc`. Only the Teams
+  brokers accept `--teams-socket`; the others refuse to start with it, so
+  keep it out of `broker.env`. The socket is mounted read-only at
+  `/run/teams-office.sock`, and the broker gives every session one MCP
+  server, `teams-office`, which runs a relay installed with the broker
+  (`teams-mcp-relay.py`, mounted read-only). No agent configuration is
+  needed. A Teams thread can use every tool the bridge offers. Start Teams
+  first: without its socket the connection is refused, and a thread
+  opened before Teams restarts keeps the old socket until you start a new
+  one.
 - **Connection limit:** each agent's broker allows 16 concurrent connections
   by default. Open projects can keep connections alive even while their
   threads are idle. To change the limit, add e.g. `--max-connections 32` inside

@@ -5,7 +5,8 @@ Runs inside the Zed Flatpak as a custom agent server. It only copies bytes
 between stdio and the dedicated Unix socket. All ACP policy is enforced by
 the host broker, so this file carries no security decisions. It takes no
 arguments: Zed must not be able to re-invoke it with auth or command input.
-The Zed entry selects the connector with env ACP_CONNECTOR=codex|claude;
+The Zed entry selects the connector with env ACP_CONNECTOR (codex, claude,
+codex-teams or claude-teams);
 each socket is bound to one fixed container on the host.
 """
 
@@ -40,7 +41,7 @@ def main():
     if len(sys.argv) > 1:
         print("acp-client: takes no arguments", file=sys.stderr)
         return 2
-    if not os.environ.get("ACP_CONNECTOR_SOCKET") and not re.fullmatch(r"[a-z]+", NAME):
+    if not os.environ.get("ACP_CONNECTOR_SOCKET") and not re.fullmatch(r"[a-z]+(-[a-z]+)*", NAME):
         print("acp-client: set ACP_CONNECTOR (e.g. codex or claude) in the Zed agent entry", file=sys.stderr)
         return 2
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

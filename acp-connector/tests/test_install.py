@@ -24,7 +24,10 @@ class InstallTest(unittest.TestCase):
         # No actual container runtime, host home, /run or systemd is touched.
         for name in ("install.sh", "agent-vm-client.py", "container-policy.py", "acp-broker.py", "acp-client.py",
                      "agent-environment.md", "agent-home.volume", "codex-acp-connector.socket",
-                     "codex-acp-connector.service", "claude-acp-connector.socket", "claude-acp-connector.service"):
+                     "codex-acp-connector.service", "claude-acp-connector.socket", "claude-acp-connector.service",
+                     "codex-teams-acp-connector.socket", "codex-teams-acp-connector.service",
+                     "claude-teams-acp-connector.socket", "claude-teams-acp-connector.service",
+                     "teams-mcp-relay.py"):
             text = (SOURCE / name).read_text()
             if name == "install.sh":
                 text = text.replace("/run/acp-agent-vm", str(self.vm))
@@ -82,9 +85,16 @@ class InstallTest(unittest.TestCase):
         self.assertNotEqual(self.installed.read_text(), "previous broker")
         self.assertTrue((self.installed.parent / "container-policy.py").is_file())
         self.assertIn("--vm-socket-dir " + str(self.vm), self.options.read_text())
-        self.assertEqual(self.events.read_text().splitlines()[-3:], ["--user daemon-reload",
+        self.assertEqual(self.events.read_text().splitlines()[-5:], ["--user daemon-reload",
                          "--user try-restart codex-acp-connector.service",
-                         "--user try-restart claude-acp-connector.service"])
+                         "--user try-restart claude-acp-connector.service",
+                         "--user try-restart codex-teams-acp-connector.service",
+                         "--user try-restart claude-teams-acp-connector.service"])
+        # Teams stays opt-in: units are installed but nothing enables them.
+        units = self.home / ".config/systemd/user"
+        self.assertTrue((units / "codex-teams-acp-connector.socket").is_file())
+        self.assertTrue((self.installed.parent / "teams-mcp-relay.py").is_file())
+        self.assertNotIn("teams-acp-connector.socket", self.events.read_text())
 
     def test_boolean_and_legacy_flags_follow_the_same_setup(self):
         for flags in (("--agent-vm",), ("--vm-socket-dir", str(self.vm))):

@@ -1,9 +1,10 @@
 #!/bin/sh
-# Install the ACP connectors (Codex and Claude Code). Run from a HOST terminal
-# (not in Zed). Copies (never symlinks) host-side code out of ~/Git.
-# Re-run after changing any of these files. Never overwrites your edits to
-# ~/.config/acp-connector/{gitconfig,broker.env,agent-environment.md}; the
-# last is updated from the repo only while you haven't edited it.
+# Install the ACP connectors (Codex and Claude Code, each also with Teams).
+# Run from a HOST terminal (not in Zed). Copies (never symlinks) host-side
+# code out of ~/Git. Re-run after changing any of these files. Never
+# overwrites your edits to ~/.config/acp-connector/{gitconfig,broker.env,
+# teams.env,agent-environment.md}; the last is updated from the repo only
+# while you haven't edited it.
 set -eu
 
 agent_vm=0
@@ -60,10 +61,13 @@ install -d -m 700 "$libexec" "$client" "$settings"
 install -m 555 "$src/container-policy.py" "$libexec/"
 install -m 555 "$src/agent-vm-client.py" "$libexec/"
 install -m 555 "$src/acp-broker.py" "$libexec/"
+install -m 555 "$src/teams-mcp-relay.py" "$libexec/"
 install -m 755 "$src/acp-client.py" "$client/"
 install -d -m 755 "$units" "$quadlets"
 for agent in codex claude; do
-    install -m 644 "$src/$agent-acp-connector.socket" "$src/$agent-acp-connector.service" "$units/"
+    for profile in "$agent" "$agent-teams"; do
+        install -m 644 "$src/$profile-acp-connector.socket" "$src/$profile-acp-connector.service" "$units/"
+    done
     install -m 644 "$src/../$agent-container/$agent-agent-state.volume" "$quadlets/"
 done
 install -m 644 "$src/agent-home.volume" "$quadlets/"
@@ -197,9 +201,12 @@ if [ -d "$HOME/Android/Sdk" ]; then add_opt --android-sdk "$HOME/Android/Sdk"; f
 echo "Broker options: $(cat "$settings/broker.env")"
 
 systemctl --user daemon-reload
-for agent in codex claude; do
-    systemctl --user try-restart "$agent-acp-connector.service"
+for profile in codex claude codex-teams claude-teams; do
+    systemctl --user try-restart "$profile-acp-connector.service"
 done
 echo "Installed. If not done yet:"
 echo "  systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket"
+if [ ! -e "$settings/teams.env" ]; then
+    echo "Teams profiles are optional and off; see acp-connector/README.md to set up $settings/teams.env."
+fi
 echo "Rebuild both images after Containerfile changes (see the READMEs)."

@@ -331,7 +331,69 @@ class ThreadTitleTests(unittest.TestCase):
 
     def test_production_profiles_have_labels(self):
         self.assertEqual({k: v["label"] for k, v in self.broker.PROFILES.items()},
-                         {"codex": "Codex", "claude": "Claude"})
+                         {"codex": "Codex", "claude": "Claude",
+                          "codex-teams": "Codex + Teams", "claude-teams": "Claude + Teams"})
+
+
+class TeamsPolicyTests(unittest.TestCase):
+    """Teams profiles get one fixed MCP server in place of Zed's."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("broker", os.path.join(HERE, "..", "acp-broker.py"))
+        cls.broker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.broker)
+
+    def test_session_openers_get_only_the_teams_server(self):
+        b = self.broker
+        p = b.Policy("/g/p", "/g", "t", "Codex + Teams", [b.TEAMS_MCP_SERVER])
+        forwarded = [{"name": "teams-office", "command": "/bin/sh", "args": ["-c", "x"], "env": []},
+                     {"name": "other", "type": "http", "url": "http://x", "headers": []}]
+        for i, method in enumerate(sorted(b.SESSION_OPENERS), 1):
+            to_agent, to_client = p.from_client({"jsonrpc": "2.0", "id": i, "method": method,
+                                                 "params": {"cwd": "/g/p", "sessionId": "s",
+                                                            "mcpServers": forwarded}})
+            self.assertEqual(to_client, [])
+            servers = to_agent[0]["params"]["mcpServers"]
+            self.assertEqual(servers, [{"name": "teams-office", "command": "/usr/bin/python3",
+                                        "args": ["-I", "/run/teams-mcp-relay.py", "/run/teams-office.sock"],
+                                        "env": []}], method)
+            servers[0]["args"].append("mutated")
+        self.assertEqual(b.TEAMS_MCP_SERVER["args"][-1], "/run/teams-office.sock")
+        plain = b.Policy("/g/p", "/g", "t", "Codex")
+        to_agent, _ = plain.from_client({"jsonrpc": "2.0", "id": 1, "method": "session/new",
+                                         "params": {"cwd": "/g/p", "mcpServers": forwarded}})
+        self.assertEqual(to_agent[0]["params"]["mcpServers"], [])
+
+    def test_relay_copies_both_ways_and_reports_missing_socket(self):
+        relay = os.path.join(HERE, "..", "teams-mcp-relay.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "bridge.sock")
+            server = socket.socket(socket.AF_UNIX)
+            server.bind(path)
+            server.listen(1)
+
+            def echo():
+                conn, _ = server.accept()
+                with conn:
+                    while data := conn.recv(65536):
+                        conn.sendall(data.upper())
+
+            t = threading.Thread(target=echo, daemon=True)
+            t.start()
+            message = b'{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' * 2000
+            p = subprocess.run([sys.executable, "-I", relay, path], input=message, capture_output=True, timeout=20)
+            server.close()
+            self.assertEqual((p.returncode, p.stdout), (0, message.upper()), p.stderr)
+            p = subprocess.run([sys.executable, "-I", relay, path], input=b"", capture_output=True, timeout=20)
+            self.assertEqual(p.returncode, 1)
+            self.assertIn(b"Start Teams", p.stderr)
+            p = subprocess.run([sys.executable, "-I", relay, "bridge.sock"], capture_output=True, timeout=20)
+            self.assertEqual(p.returncode, 2)
+
+    def test_only_teams_profiles_are_marked(self):
+        self.assertEqual({k for k, v in self.broker.PROFILES.items() if v.get("teams")},
+                         {"codex-teams", "claude-teams"})
 
 
 class LifecycleTests(BrokerTest):
@@ -572,6 +634,11 @@ class ActivationTest(BrokerTest):
                       ["--profile", "codex", "--memory", self.git + "/a=b"],
                       ["--profile", "codex", "--vm-socket-dir", os.path.abspath(HARNESS)],
                       ["--profile", "codex", "--vm-socket-dir", self.git + "/a,b"],
+                      ["--profile", "codex", "--teams-socket", os.path.join(self.tmp, "bridge.sock")],
+                      ["--profile", "claude", "--teams-socket", os.path.join(self.tmp, "bridge.sock")],
+                      ["--profile", "codex-teams"],
+                      ["--profile", "claude-teams", "--teams-socket", "bridge.sock"],
+                      ["--profile", "codex-teams", "--teams-socket", self.tmp + "/a,b.sock"],
                       ["--profile", "codex", "--writable", self.git],
                       ["--profile", "codex", "--writable", self.tmp],
                       ["--profile", "codex", "--writable", os.path.join(self.git, "missing")],
@@ -594,6 +661,44 @@ class ActivationTest(BrokerTest):
         self.assertTrue(any("starting without VM activation" in line for line in lines))
         argv = next(line for line in lines if "agent: /usr/bin/podman" in line)
         self.assertNotIn("dst=/opt/agent-vm", argv)
+
+    def test_teams_profiles_mount_the_socket_and_relay(self):
+        teams_sock = os.path.join(self.tmp, "bridge.sock")
+        with socket.socket(socket.AF_UNIX) as s:
+            s.bind(teams_sock)
+        relay = os.path.abspath(os.path.join(HERE, "..", "teams-mcp-relay.py"))
+        for profile, image in (("codex-teams", "codex-agent"), ("claude-teams", "claude-agent")):
+            with self.subTest(profile=profile):
+                if os.path.exists(self.sock):
+                    os.unlink(self.sock)
+                started = self.broker_text().count("agent: /usr/bin/podman")
+                self.start_broker(profile, "--teams-socket", teams_sock)
+                self.zed().initialize()
+                lines = [l for l in self.broker_text().splitlines() if "agent: /usr/bin/podman" in l]
+                self.assertEqual(len(lines), started + 1)
+                argv = shlex.split(lines[-1].split("agent: ", 1)[1])
+                for mount in (f"--mount=type=bind,src={teams_sock},dst=/run/teams-office.sock,ro=true",
+                              f"--mount=type=bind,src={relay},dst=/run/teams-mcp-relay.py,ro=true",
+                              f"--label=acp-connector.profile={profile}",
+                              f"--mount=type=volume,src={image}-state,dst=/home/node/{'.' + profile.split('-')[0]}"):
+                    self.assertIn(mount, argv)
+                self.assertEqual(argv[-2], f"localhost/{image}:local")
+                self.stop(self.broker)
+
+    def test_teams_profile_without_teams_is_refused(self):
+        # Teams not running, or a plain file where the socket should be.
+        plain = os.path.join(self.tmp, "plain")
+        open(plain, "w").close()
+        for path in (os.path.join(self.tmp, "missing.sock"), plain):
+            with self.subTest(path=path):
+                if os.path.exists(self.sock):
+                    os.unlink(self.sock)
+                self.start_broker("codex-teams", "--teams-socket", path)
+                resp = self.zed().initialize()
+                self.assertIn(f"Teams MCP socket {path} is missing", resp["error"]["message"])
+                self.assertIsNone(self.broker.poll())
+                self.assertNotIn("agent: /usr/bin/podman", self.broker_text())
+                self.stop(self.broker)
 
     def test_removed_writable_folder_is_skipped(self):
         gone = os.path.join(self.git, "gone")
