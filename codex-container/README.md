@@ -14,7 +14,7 @@ limitations.
 - Debian packages: Git, OpenSSH client (for SSH commit signing), ripgrep,
   curl, archive tools, `build-essential`, `pkg-config`, `libssl-dev`,
   Python 3 with `venv`/`pip`/headers, OpenJDK 17, `flatpak-builder`, and
-  `rpm` (for `rpmbuild`).
+  `rpm` (for `rpmbuild`), Chromium and the Liberation fonts.
   Their versions are not frozen, so uncached rebuilds (`../update.sh`)
   pick up security updates. This step is identical in the Claude image,
   so the layer is shared.
@@ -27,6 +27,9 @@ limitations.
   (`GIT_CONFIG_GLOBAL`) and SSH agent socket.
 - The Word and Excel MCP servers from [`../office-mcp`](../office-mcp/README.md),
   in venvs under `/opt/office-mcp`, registered in the seeded `config.toml`.
+- The Univer Workspace CLI `uvw` from [`../univer-cli`](../univer-cli/README.md),
+  in `/opt/univer-workspace-cli`, with its Skill in `/etc/codex/skills`. Its
+  login is kept in this agent's state volume (`UNIVER_HOME`).
 
 Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 
@@ -35,7 +38,8 @@ Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 ```sh
 cd ~/Git/zed-agent-containers/codex-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
-  build --build-context office-mcp=../office-mcp -t localhost/codex-agent:local .
+  build --build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
+  -t localhost/codex-agent:local .
 ```
 
 The explicit storage option works around this host's unavailable kernel

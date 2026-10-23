@@ -42,7 +42,8 @@ if [ "$build" = 1 ]; then
     for agent in codex claude; do
         echo "== Building localhost/$agent-agent:local"
         (cd "$src/$agent-container" && $podman build \
-            --build-context office-mcp="$src/office-mcp" -t "localhost/$agent-agent:local" .)
+            --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+            -t "localhost/$agent-agent:local" .)
     done
 fi
 

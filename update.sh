@@ -1,8 +1,9 @@
 #!/bin/sh
-# Update the agent images: move the pinned npm packages and the Word and
-# Excel MCP servers (PyPI) to their newest releases that are at least 3 days
-# old, and the Node base image digest to the latest, then rebuild both
-# images without cache so the Debian packages are refreshed too. Run from a
+# Update the agent images: move the pinned npm packages (the agents and the
+# Univer Workspace CLI) and the Word and Excel MCP servers (PyPI) to their
+# newest releases that are at least 3 days old, and the Node base image
+# digest to the latest, then rebuild both images without cache so the
+# Debian packages are refreshed too. Run from a
 # HOST terminal, after a first ./install.sh: the MCP servers are locked with
 # the Python in the Codex image.
 #   ./update.sh               bump the pins, rebuild, run the smoke tests
@@ -111,7 +112,9 @@ codex_pick=$(pick @openai/codex "$(pinned codex-container @openai/codex)")
 codex_acp_pick=$(pick @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)")
 claude_acp_pick=$(pick @agentclientprotocol/claude-agent-acp \
     "$(pinned claude-container @agentclientprotocol/claude-agent-acp)")
+uvw_pick=$(pick univer-workspace-cli "$(pinned univer-cli univer-workspace-cli)")
 codex=${codex_pick%% *} codex_acp=${codex_acp_pick%% *} claude_acp=${claude_acp_pick%% *}
+uvw=${uvw_pick%% *}
 docx_pick=$(pypi_pick docx-mcp-server "$(pypi_pinned docx.txt docx-mcp-server)")
 excel_pick=$(pypi_pick excel-mcp-server "$(pypi_pinned excel.txt excel-mcp-server)")
 docx=${docx_pick%% *} excel=${excel_pick%% *}
@@ -133,6 +136,7 @@ row @openai/codex "$(pinned codex-container @openai/codex)" "$codex_pick"
 row @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)" "$codex_acp_pick"
 row @agentclientprotocol/claude-agent-acp "$(pinned claude-container @agentclientprotocol/claude-agent-acp)" \
     "$claude_acp_pick"
+row univer-workspace-cli "$(pinned univer-cli univer-workspace-cli)" "$uvw_pick"
 row "docx-mcp-server (PyPI)" "$(pypi_pinned docx.txt docx-mcp-server)" "$docx_pick"
 row "excel-mcp-server (PyPI)" "$(pypi_pinned excel.txt excel-mcp-server)" "$excel_pick"
 echo "$base"
@@ -155,18 +159,26 @@ echo "== Updating pins"
 npm_in "$src/codex-container" pkg set "dependencies.@openai/codex=$codex" \
     "overrides.@openai/codex=$codex" "dependencies.@agentclientprotocol/codex-acp=$codex_acp"
 npm_in "$src/claude-container" pkg set "dependencies.@agentclientprotocol/claude-agent-acp=$claude_acp"
+npm_in "$src/univer-cli" pkg set "dependencies.univer-workspace-cli=$uvw"
 # The other dependencies resolve as of the cutoff too. npm refuses pins
 # newer than --before, so a pin kept from an earlier, newer choice moves
 # that image's date up to when the pin was published.
 later() { if [ "$1" \> "$2" ]; then echo "$1"; else echo "$2"; fi; }
 codex_before=$(later "$(later "$cutoff" "${codex_pick##* }")" "${codex_acp_pick##* }")
 claude_before=$(later "$cutoff" "${claude_acp_pick##* }")
-for image_dir in codex-container claude-container; do
-    if [ "$image_dir" = codex-container ]; then before=$codex_before; else before=$claude_before; fi
+uvw_before=$(later "$cutoff" "${uvw_pick##* }")
+for lock_dir in codex-container claude-container univer-cli; do
+    case $lock_dir in
+        codex-container) before=$codex_before ;;
+        claude-container) before=$claude_before ;;
+        univer-cli) before=$uvw_before ;;
+    esac
     [ "$min_age" = 0 ] && before=
     # Pins first, then the other dependencies within their ranges.
-    npm_in "$src/$image_dir" install --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
-    npm_in "$src/$image_dir" update --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
+    npm_in "$src/$lock_dir" install --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
+    npm_in "$src/$lock_dir" update --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
+done
+for image_dir in codex-container claude-container; do
     sed -i "s|^FROM $base@sha256:[0-9a-f]*|FROM $base@$digest|" "$src/$image_dir/Containerfile"
 done
 # The MCP servers' dependencies, hash-pinned for the images' Python 3.11, by
@@ -188,11 +200,13 @@ if [ "$build" = 1 ]; then
     step="building localhost/codex-agent:local"
     echo "== Building localhost/codex-agent:local"
     (cd "$src/codex-container" && $podman build --no-cache \
-        --build-context office-mcp="$src/office-mcp" -t localhost/codex-agent:local .)
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        -t localhost/codex-agent:local .)
     step="building localhost/claude-agent:local"
     echo "== Building localhost/claude-agent:local"
     (cd "$src/claude-container" && $podman build \
-        --build-context office-mcp="$src/office-mcp" -t localhost/claude-agent:local .)
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        -t localhost/claude-agent:local .)
     step="running the smoke tests"
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex

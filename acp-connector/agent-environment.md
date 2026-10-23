@@ -9,7 +9,15 @@ directly on the user's machine.
 - You are uid 1000 (`node`) without sudo; you cannot install system
   packages. Installed: Node 22 + npm, Python 3.11 (`venv`, `pip`), gcc/make
   (`build-essential`, `pkg-config`, `libssl-dev`), OpenJDK 17, git, curl,
-  ripgrep, zip/unzip/xz, flatpak-builder, rpmbuild, Meson, Ninja, jsdom.
+  ripgrep, zip/unzip/xz, flatpak-builder, rpmbuild, Meson, Ninja, jsdom,
+  Chromium.
+- `uvw`, the Univer Workspace CLI (npm `univer-workspace-cli`), is installed
+  and pinned in the image; never install it or the unrelated `uvw` packages
+  with npm. For Univer Workspace tasks, use the `univer-workspace-cli` Skill
+  and the guidance from `uvw skills get core`. If no Workspace origin is
+  configured, ask the user for theirs instead of using the default service.
+  Its login lives in your state volume (`UNIVER_HOME`), separate from the
+  other agent's; never print `session.json`.
 - The `docx-mcp` and `excel` MCP servers run in this container. Use them to
   read and edit Word (`.docx`) and Excel (`.xlsx`, `.xlsm`) files; they see
   the same files you do. docx-mcp's `scrub_pii` and PDF export are not

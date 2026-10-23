@@ -5,6 +5,7 @@ USER root
 # Keep this step identical in both agent images so the layer is shared.
 # Build tools for testing/building projects; agents add other toolchains
 # (rustup, uv, Go) to their writable home at runtime.
+# Chromium renders Univer Workspace screenshots and PDFs (uvw, below).
 # (slim images lack man1, which the OpenJDK package scripts need)
 RUN mkdir -p /usr/share/man/man1 \
  && apt-get update \
@@ -15,6 +16,7 @@ RUN mkdir -p /usr/share/man/man1 \
       node-jsdom \
       openjdk-17-jdk-headless \
       flatpak-builder rpm \
+      chromium fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 
 # The Word and Excel MCP servers, each in its own venv (docx-mcp needs the
@@ -29,6 +31,17 @@ RUN for server in docx excel; do \
       || exit 1; \
     done
 
+# The Univer Workspace CLI (uvw), pinned with its dependencies in
+# ../univer-cli (build with --build-context univer-cli=../univer-cli). Its
+# native parts are prebuilt packages, so no install scripts run. Linked into
+# /usr/local/bin, which login shells keep on PATH. Identical in both images.
+WORKDIR /opt/univer-workspace-cli
+COPY --from=univer-cli package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && npm cache clean --force \
+ && ln -s /opt/univer-workspace-cli/node_modules/.bin/uvw \
+      /opt/univer-workspace-cli/node_modules/.bin/univer-workspace-cli /usr/local/bin/
+
 WORKDIR /opt/agent
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
@@ -41,6 +54,8 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     HOME=/home/node \
     CODEX_HOME=/home/node/.codex \
     CODEX_PATH=/opt/agent/node_modules/.bin/codex \
+    UNIVER_HOME=/home/node/.codex/univer-workspace \
+    UNIVER_RENDER_BROWSER=/usr/bin/chromium \
     INITIAL_AGENT_MODE=agent-full-access \
     NO_BROWSER=1 \
     GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
@@ -51,6 +66,10 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
 RUN mkdir -p /opt/agent-git \
  && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock /opt/agent-git/known_hosts
 RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
+# The Workspace CLI's discovery Skill, from the Univer release that uvw is
+# pinned to. In the image, not the state volume, so rebuilds update it.
+# Codex reads system-wide skills from /etc/codex/skills.
+COPY --from=univer-cli SKILL.md /etc/codex/skills/univer-workspace-cli/SKILL.md
 RUN mkdir -p /home/node/.codex /workspace \
  && chown node:node /home/node/.codex
 COPY config.toml /home/node/.codex/config.toml

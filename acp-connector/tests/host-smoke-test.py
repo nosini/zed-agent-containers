@@ -147,6 +147,18 @@ def main():
         office = inside("/opt/office-mcp/docx/bin/python3 -I -c 'import docx_mcp.server' "
                         "&& /opt/office-mcp/excel/bin/excel-mcp-server --help >/dev/null")
         check("Word and Excel MCP servers load", office.returncode == 0, office.stderr[-200:])
+        # Offline: no Workspace request, no login. Its settings and login
+        # belong in the agent's state volume, not the shared home.
+        skill = ("/etc/codex/skills" if agent.startswith("codex") else "/etc/claude-code/.claude/skills") + \
+            "/univer-workspace-cli/SKILL.md"
+        uvw = inside(f'test "$UNIVER_HOME" = {state}/univer-workspace && test -r {skill} '
+                     "&& bash -lc 'uvw --version' && univer-workspace-cli --version "
+                     "&& uvw skills get core >/dev/null")
+        check("Univer Workspace CLI runs, state in the agent's volume", uvw.returncode == 0,
+              (uvw.stderr or uvw.stdout)[-200:])
+        browser = inside("uvw screenshot setup --json")
+        check("Chromium for Workspace rendering launches", '"resolved"' in browser.stdout,
+              (browser.stdout or browser.stderr)[-200:])
         check("host home not visible", inside(f"! ls -d {HOME}/.ssh {HOME}/.config /run/user/*/bus 2>/dev/null").returncode == 0)
         ident = inside(f"git -C '{project}' config user.name").stdout.strip()
         check("git identity configured", bool(ident), "no user.name; see ~/.config/acp-connector/gitconfig")

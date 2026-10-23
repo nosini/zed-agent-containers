@@ -9,7 +9,7 @@ ACP policy, tests and limitations.
 ## Image
 
 - The same pinned Node 22 base, Debian packages (build tools, Python venv,
-  OpenJDK 17, OpenSSH client, `flatpak-builder`, `rpm`) and `PATH` setup as
+  OpenJDK 17, OpenSSH client, `flatpak-builder`, `rpm`, Chromium) and `PATH` setup as
   `codex-container`. The package layer is shared between the two images.
 - `@agentclientprotocol/claude-agent-acp` 0.88.0. The Claude Code CLI
   (2.1.293) is the locked native binary
@@ -30,13 +30,18 @@ ACP policy, tests and limitations.
   SSH agent socket.
 - The Word and Excel MCP servers from [`../office-mcp`](../office-mcp/README.md),
   in venvs under `/opt/office-mcp`, registered in the seeded `.claude.json`.
+- The Univer Workspace CLI `uvw` from [`../univer-cli`](../univer-cli/README.md),
+  in `/opt/univer-workspace-cli`, with its Skill in
+  `/etc/claude-code/.claude/skills`. Its login is kept in this agent's state
+  volume (`UNIVER_HOME`).
 
 ## Build (host terminal)
 
 ```sh
 cd ~/Git/zed-agent-containers/claude-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
-  build --build-context office-mcp=../office-mcp -t localhost/claude-agent:local .
+  build --build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
+  -t localhost/claude-agent:local .
 ```
 
 ## State and login

@@ -134,7 +134,8 @@ troubleshooting.
 The agents run commands inside their container.
 - **In the images:** Node 22 + npm, Python 3.11 with `venv`/`pip`,
   `build-essential`, `pkg-config`, `libssl-dev`, OpenJDK 17, git, curl,
-  archive tools, `flatpak-builder` and `rpmbuild`.
+  archive tools, `flatpak-builder`, `rpmbuild`, Chromium, and the Univer
+  Workspace CLI `uvw` ([login and use](../univer-cli/README.md)).
 - **Toolchains the agents install themselves:** anything else goes into the
   shared, persistent `agent-home` volume, without root. That covers
   `rustup`, `uv` (other Python versions), the Go tarball in `~/.local/go`,
@@ -264,8 +265,9 @@ is faster:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
-(cd ~/Git/zed-agent-containers/codex-container && $P build --build-context office-mcp=../office-mcp -t localhost/codex-agent:local .)
-(cd ~/Git/zed-agent-containers/claude-container && $P build --build-context office-mcp=../office-mcp -t localhost/claude-agent:local .)
+C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli"
+(cd ~/Git/zed-agent-containers/codex-container && $P build $C -t localhost/codex-agent:local .)
+(cd ~/Git/zed-agent-containers/claude-container && $P build $C -t localhost/claude-agent:local .)
 ```
 
 Install. This also migrates the earlier long-lived containers; their state
