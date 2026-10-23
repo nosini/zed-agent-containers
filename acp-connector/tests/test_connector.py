@@ -365,7 +365,7 @@ class TeamsPolicyTests(unittest.TestCase):
                                          "params": {"cwd": "/g/p", "mcpServers": forwarded}})
         self.assertEqual(to_agent[0]["params"]["mcpServers"], [])
 
-    def test_relay_copies_both_ways_and_reports_missing_socket(self):
+    def test_relay_copies_both_ways_and_reports_failures(self):
         relay = os.path.join(HERE, "..", "teams-mcp-relay.py")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "bridge.sock")
@@ -383,11 +383,23 @@ class TeamsPolicyTests(unittest.TestCase):
             t.start()
             message = b'{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' * 2000
             p = subprocess.run([sys.executable, "-I", relay, path], input=message, capture_output=True, timeout=20)
-            server.close()
             self.assertEqual((p.returncode, p.stdout), (0, message.upper()), p.stderr)
+            t.join(5)
+
+            # What the broker's forwarder does when Teams isn't answering.
+            def hang_up():
+                conn, _ = server.accept()
+                conn.close()
+
+            threading.Thread(target=hang_up, daemon=True).start()
+            p = subprocess.run([sys.executable, "-I", relay, path], input=message, capture_output=True, timeout=20)
+            server.close()
+            self.assertEqual((p.returncode, p.stdout), (1, b""))
+            self.assertIn(b"Start Teams", p.stderr)
+            self.assertIn(b"start a new thread", p.stderr)
             p = subprocess.run([sys.executable, "-I", relay, path], input=b"", capture_output=True, timeout=20)
             self.assertEqual(p.returncode, 1)
-            self.assertIn(b"Start Teams", p.stderr)
+            self.assertIn(b"Reconnect the agent", p.stderr)
             p = subprocess.run([sys.executable, "-I", relay, "bridge.sock"], capture_output=True, timeout=20)
             self.assertEqual(p.returncode, 2)
 
@@ -631,9 +643,6 @@ class ActivationTest(BrokerTest):
                       ["--profile", "codex", "--vm-socket-dir", self.git + "/a,b"],
                       ["--profile", "codex", "--teams-socket", os.path.join(self.tmp, "bridge.sock")],
                       ["--profile", "claude", "--teams-socket", os.path.join(self.tmp, "bridge.sock")],
-                      ["--profile", "codex-teams"],
-                      ["--profile", "claude-teams", "--teams-socket", "bridge.sock"],
-                      ["--profile", "codex-teams", "--teams-socket", self.tmp + "/a,b.sock"],
                       ["--profile", "codex", "--max-connections", "0"],
                       ["--profile", "codex", "--max-connections", "-1"],
                       ["--profile", "codex", "--max-connections", "many"]):
@@ -652,40 +661,115 @@ class ActivationTest(BrokerTest):
         argv = next(line for line in lines if "agent: /usr/bin/podman" in line)
         self.assertNotIn("dst=/opt/agent-vm", argv)
 
-    def test_teams_profiles_mount_the_socket_and_relay(self):
+    def teams_server(self, path):
+        """A fake Teams bridge: answers each line with its upper-case copy."""
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(path)
+        server.listen(4)
+        self.addCleanup(server.close)
+
+        def serve():
+            while True:
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    return
+                with conn:
+                    while data := conn.recv(65536):
+                        conn.sendall(data.upper())
+
+        threading.Thread(target=serve, daemon=True).start()
+        return server
+
+    def test_teams_profiles_mount_the_forwarder_and_relay(self):
         teams_sock = os.path.join(self.tmp, "bridge.sock")
-        with socket.socket(socket.AF_UNIX) as s:
-            s.bind(teams_sock)
+        self.teams_server(teams_sock)
         relay = os.path.abspath(os.path.join(HERE, "..", "teams-mcp-relay.py"))
         for profile, image in (("codex-teams", "codex-agent"), ("claude-teams", "claude-agent")):
             with self.subTest(profile=profile):
                 if os.path.exists(self.sock):
                     os.unlink(self.sock)
+                runtime = os.path.join(self.tmp, f"{profile}-runtime")
+                os.makedirs(runtime)
                 started = self.broker_text().count("agent: /usr/bin/podman")
-                self.start_broker(profile, "--teams-socket", teams_sock)
+                self.start_broker(profile, "--teams-socket", teams_sock,
+                                  env=dict(os.environ, RUNTIME_DIRECTORY=runtime))
                 self.zed().initialize()
                 lines = [l for l in self.broker_text().splitlines() if "agent: /usr/bin/podman" in l]
                 self.assertEqual(len(lines), started + 1)
                 argv = shlex.split(lines[-1].split("agent: ", 1)[1])
-                for mount in (f"--mount=type=bind,src={teams_sock},dst=/run/teams-office.sock,ro=true",
+                forwarder = os.path.join(runtime, "teams-office.sock")
+                for mount in (f"--mount=type=bind,src={forwarder},dst=/run/teams-office.sock",
                               f"--mount=type=bind,src={relay},dst=/run/teams-mcp-relay.py,ro=true",
                               f"--label=acp-connector.profile={profile}",
                               f"--mount=type=volume,src={image}-state,dst=/home/node/{'.' + profile.split('-')[0]}"):
                     self.assertIn(mount, argv)
+                self.assertNotIn(teams_sock, " ".join(argv), "Teams' own socket must not be mounted")
+                self.assertEqual(oct(os.stat(forwarder).st_mode & 0o777), "0o600")
                 self.assertEqual(argv[-2], f"localhost/{image}:local")
                 self.stop(self.broker)
+                self.assertFalse(os.path.exists(forwarder))
+
+    def test_forwarder_follows_a_restarted_teams(self):
+        teams_sock = os.path.join(self.tmp, "bridge.sock")
+        server = self.teams_server(teams_sock)
+        runtime = os.path.join(self.tmp, "runtime")
+        os.makedirs(runtime)
+        self.start_broker("codex-teams", "--teams-socket", teams_sock, env=dict(os.environ, RUNTIME_DIRECTORY=runtime))
+        forwarder = os.path.join(runtime, "teams-office.sock")
+        self.assertTrue(wait_for(lambda: os.path.exists(forwarder)))
+        relay = os.path.join(HERE, "..", "teams-mcp-relay.py")
+        message = b'{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' * 2000
+
+        def run_relay():
+            return subprocess.run([sys.executable, "-I", relay, forwarder], input=message,
+                                  capture_output=True, timeout=20)
+
+        p = run_relay()
+        self.assertEqual((p.returncode, p.stdout), (0, message.upper()), p.stderr)
+        # Teams quits: a new thread's relay says so.
+        server.close()
+        os.unlink(teams_sock)
+        p = run_relay()
+        self.assertEqual(p.returncode, 1)
+        self.assertIn(b"Start Teams", p.stderr)
+        self.assertIn("[teams] cannot reach", self.broker_text())
+        # Teams starts again with a new socket; the same forwarder reaches it.
+        self.teams_server(teams_sock)
+        p = run_relay()
+        self.assertEqual((p.returncode, p.stdout), (0, message.upper()), p.stderr)
+        self.assertIsNone(self.broker.poll())
 
     def test_teams_profile_without_teams_is_refused(self):
-        # Teams not running, or a plain file where the socket should be.
+        # Teams not running, a socket Teams left behind when it crashed, or a
+        # plain file where the socket should be.
+        stale = os.path.join(self.tmp, "stale.sock")
+        with socket.socket(socket.AF_UNIX) as s:
+            s.bind(stale)
         plain = os.path.join(self.tmp, "plain")
         open(plain, "w").close()
-        for path in (os.path.join(self.tmp, "missing.sock"), plain):
+        for path in (os.path.join(self.tmp, "missing.sock"), stale, plain):
             with self.subTest(path=path):
                 if os.path.exists(self.sock):
                     os.unlink(self.sock)
                 self.start_broker("codex-teams", "--teams-socket", path)
                 resp = self.zed().initialize()
-                self.assertIn(f"Teams MCP socket {path} is missing", resp["error"]["message"])
+                self.assertIn(f"Teams MCP socket {path} is not answering", resp["error"]["message"])
+                self.assertIsNone(self.broker.poll())
+                self.assertNotIn("agent: /usr/bin/podman", self.broker_text())
+                self.stop(self.broker)
+
+    def test_teams_profile_without_configuration_refuses_connections(self):
+        # A missing teams.env, or a typo in it: the broker keeps running and
+        # tells Zed why, instead of exiting into a restart loop.
+        for extra in ([], ["--teams-socket", "bridge.sock"]):
+            with self.subTest(extra=extra):
+                if os.path.exists(self.sock):
+                    os.unlink(self.sock)
+                self.start_broker("claude-teams", *extra)
+                resp = self.zed().initialize()
+                self.assertIn("Teams MCP socket not configured", resp["error"]["message"])
+                self.assertIn("teams.env", resp["error"]["message"])
                 self.assertIsNone(self.broker.poll())
                 self.assertNotIn("agent: /usr/bin/podman", self.broker_text())
                 self.stop(self.broker)

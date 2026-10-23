@@ -4,26 +4,26 @@
 // fixed container on the host. Leave "args" as is: the client rejects arguments.
 {
   "agent_servers": {
-    "Codex (read-only container)": {
+    "Codex (container)": {
       "type": "custom",
       "command": "/usr/bin/python3",
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
       "env": { "ACP_CONNECTOR": "codex" }
     },
-    "Claude Code (read-only container)": {
+    "Claude Code (container)": {
       "type": "custom",
       "command": "/usr/bin/python3",
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
       "env": { "ACP_CONNECTOR": "claude" }
     },
     // Optional: the same agents with Teams for Linux's MCP bridge (README).
-    "Codex + Teams (read-only container)": {
+    "Codex + Teams (container)": {
       "type": "custom",
       "command": "/usr/bin/python3",
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
       "env": { "ACP_CONNECTOR": "codex-teams" }
     },
-    "Claude Code + Teams (read-only container)": {
+    "Claude Code + Teams (container)": {
       "type": "custom",
       "command": "/usr/bin/python3",
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],

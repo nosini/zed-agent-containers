@@ -1,8 +1,11 @@
 #!/usr/bin/python3
-"""Host smoke test for an installed connector: host-smoke-test.py codex|claude [PROJECT]
+"""Host smoke test for an installed connector:
+host-smoke-test.py codex|claude|codex-teams|claude-teams [PROJECT]
 
 Run from a HOST terminal after install.sh, rebuilding the images and enabling
 the <agent>-acp-connector.socket units. PROJECT defaults to this repository.
+The Teams profiles also check the relay reaches Teams; with Teams not running
+they report SKIP for those checks.
 Needs no credentials and sends no model requests. It connects like Zed does
 (the client started in the project directory), inspects the per-connection
 container while it runs, and checks it is removed afterwards.
@@ -16,6 +19,9 @@ import time
 
 AGENTS = {"codex": ("@agentclientprotocol/codex-acp", "/home/node/.codex"),
           "claude": ("@agentclientprotocol/claude-agent-acp", "/home/node/.claude")}
+AGENTS.update({f"{a}-teams": AGENTS[a] for a in list(AGENTS)})
+MCP_INIT = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+    "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "host-smoke-test", "version": "1"}}})
 PODMAN = ["podman", "--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs"]
 HOME = os.path.expanduser("~")
 GIT = os.path.join(HOME, "Git")
@@ -68,6 +74,7 @@ def main():
     repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
     project = os.path.realpath(sys.argv[2] if len(sys.argv) == 3 else repo)
     adapter, state = AGENTS[agent]
+    teams = agent.endswith("-teams")
     sock = f"/run/user/{os.getuid()}/app/dev.zed.Zed/{agent}-acp.sock"
 
     check("socket unit active", sh("systemctl", "--user", "-q", "is-active", f"{agent}-acp-connector.socket").returncode == 0)
@@ -77,6 +84,12 @@ def main():
     c = Client(agent, project)
     init = c.rpc("initialize", {"protocolVersion": 1, "clientCapabilities": {
         "fs": {"readTextFile": True, "writeTextFile": True}, "terminal": True, "_meta": {"terminal_output": True}}})
+    message = init.get("error", {}).get("message", "")
+    if teams and "Teams MCP socket" in message:
+        print(f"SKIP Teams profile checks: {message}")
+        c.close()
+        print(f"failures: {failures}")
+        sys.exit(min(failures, 1))
     info = init.get("result", {}).get("agentInfo", {})
     check(f"handshake reaches {adapter}", info.get("name") == adapter, json.dumps(init)[:300])
     check("no _meta reaches the editor", "_meta" not in json.dumps(init))
@@ -94,7 +107,10 @@ def main():
         optional = {"/opt/agent-git/gitconfig:false", "/opt/agent-git/ssh-agent.sock:true",
                     "/opt/agent-vm:false", "/opt/agent-vm-client.py:false",
                     "/opt/agent-git/known_hosts:false", "/home/node/memory:true",
-                    f"{HOME}/Android/Sdk:false", f"{state}/{'AGENTS.md' if agent == 'codex' else 'CLAUDE.md'}:false"}
+                    f"{HOME}/Android/Sdk:false",
+                    f"{state}/{'AGENTS.md' if agent.startswith('codex') else 'CLAUDE.md'}:false"}
+        if teams:
+            expected |= {"/run/teams-office.sock:true", "/run/teams-mcp-relay.py:false"}
         extra = mounts - expected - optional
         check("mounts: ~/Git rw, agent home, state (+ optional extras)",
               expected <= mounts and not extra, str(sorted(mounts)))
@@ -115,6 +131,17 @@ def main():
                   "/opt/agent-vm-client.py:false" in mounts and
                   inside("test -S /opt/agent-vm/ssh.sock && test -S /opt/agent-vm/control.sock "
                          "&& test -r /opt/agent-vm-client.py").returncode == 0)
+        if teams:
+            # The relay the injected teams-office server runs, through the
+            # broker's forwarder, to Teams; stdin stays open until it replies.
+            relay = inside(f"(printf '%s\\n' '{MCP_INIT}'; sleep 10) | timeout 15 python3 -I /run/teams-mcp-relay.py "
+                           "/run/teams-office.sock | head -n 1")
+            try:
+                result = json.loads(relay.stdout).get("result")
+            except (ValueError, AttributeError):
+                result = None
+            check("Teams MCP answers through the relay", isinstance(result, dict) and "serverInfo" in result,
+                  (relay.stdout or relay.stderr)[-300:])
         tools = inside("gcc --version && java -version && python3 -m venv --help && npm --version")
         check("build tools present (gcc, java, venv, npm)", tools.returncode == 0, tools.stderr[-200:])
         office = inside("/opt/office-mcp/docx/bin/python3 -I -c 'import docx_mcp.server' "

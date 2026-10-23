@@ -71,25 +71,39 @@ one container.
   printf 'ACP_TEAMS_OPTS="--teams-socket %s"\n' "$HOME/.var/app/eu.nosini.TeamsOffice/config/teams-for-linux/mcp/bridge.sock" \
     > ~/.config/acp-connector/teams.env
   systemctl --user enable --now codex-teams-acp-connector.socket claude-teams-acp-connector.socket
+  cd ~/Git/zed-agent-containers/acp-connector  # with Teams running:
+  tests/host-smoke-test.py codex-teams && tests/host-smoke-test.py claude-teams
   ```
 
   Then add the two Teams entries from `zed-settings.jsonc`. Only the Teams
   brokers accept `--teams-socket`; the others refuse to start with it, so
-  keep it out of `broker.env`. The socket is mounted read-only at
-  `/run/teams-office.sock`, and the broker gives every session one MCP
-  server, `teams-office`, which runs a relay installed with the broker
-  (`teams-mcp-relay.py`, mounted read-only). No agent configuration is
-  needed. A Teams thread can use every tool the bridge offers. Start Teams
-  first: without its socket the connection is refused, and a thread
-  opened before Teams restarts keeps the old socket until its agent
-  container is recreated. After changing `teams.env` or restarting Teams,
-  restart the Teams brokers on the host, then reconnect the agent in Zed:
+  keep it out of `broker.env`. A Teams broker with no usable `teams.env`
+  keeps running and refuses each connection with the reason, shown in Zed.
+  - **Access:** a Teams thread can use every tool the bridge offers,
+    including writes to your open documents. Mounting a socket read-only
+    doesn't restrict what can be done through it.
+  - **How it connects:** Teams' own socket isn't mounted. Each Teams broker
+    listens on a socket of its own, `$XDG_RUNTIME_DIR/<profile>-acp-connector/teams-office.sock`
+    (0600), and passes every connection on to the path in `teams.env`,
+    looked up anew each time. Containers mount the broker's socket at
+    `/run/teams-office.sock`, together with a relay installed with the
+    broker (`teams-mcp-relay.py`, mounted read-only). The broker gives every
+    session one MCP server, `teams-office`, which runs that relay, so no
+    agent configuration is needed.
+  - **Teams not running:** a new connection is refused, including when
+    Teams crashed and left its socket file behind. If Teams quits or
+    restarts while a thread is open, that thread's relay exits; the broker
+    needs no restart. Claude Code starts a new relay on the next Teams tool
+    call, so its open threads recover once Teams is back. Codex doesn't:
+    its open thread keeps failing with "Transport closed", so start a new
+    Codex thread. Teams accepts four MCP connections at a time, so a fifth
+    thread is cut off the same way.
+  - **After changing `teams.env`,** restart the Teams brokers on the host
+    (this ends open Teams threads), then reconnect the agent in Zed:
 
-  ```sh
-  systemctl --user restart codex-teams-acp-connector.service claude-teams-acp-connector.service
-  ```
-
-  A new thread on an existing connection still uses the same container.
+    ```sh
+    systemctl --user try-restart codex-teams-acp-connector.service claude-teams-acp-connector.service
+    ```
 - **Connection limit:** each agent's broker allows 16 concurrent connections
   by default. Open projects can keep connections alive even while their
   threads are idle. To change the limit, add e.g. `--max-connections 32` inside
@@ -329,6 +343,13 @@ socket to the broker:
   and sockets are 0600.
 - **Socket activation:** the broker does not unlink the systemd-owned
   socket path.
+- **Teams:** both Teams profiles mount the broker's 0600 forwarder socket
+  and the relay, never Teams' own socket, and inject only the `teams-office`
+  server. The relay copies both ways; a Teams socket that is missing,
+  left behind by a crash or not a socket refuses the connection; a missing
+  or relative `--teams-socket` refuses connections instead of stopping the
+  broker. After Teams' socket is removed and recreated, the same forwarder
+  reaches the new one.
 - **Real adapters, offline, throwaway state:** codex-acp 1.12.0 and
   claude-agent-acp 0.81.2 both complete the handshake through the policy.
 - **Mutation checks:** disabling the git-root check, the path-character

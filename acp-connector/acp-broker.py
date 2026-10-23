@@ -35,11 +35,13 @@ import os
 import posixpath
 import runpy
 import shlex
+import shutil
 import signal
 import socket
 import stat
 import struct
 import sys
+import tempfile
 
 POLICY = runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "container-policy.py"))
 PODMAN = POLICY["PODMAN"]
@@ -72,10 +74,12 @@ KNOWN_HOSTS_TARGET = "/opt/agent-git/known_hosts"
 # Notes shared by all agents across projects (read-write). The git repository
 # around it stays on the host, so the agents can't touch its hooks or config.
 MEMORY_TARGET = "/home/node/memory"
-# Teams profiles: Teams for Linux's MCP bridge socket and the relay the agents
-# run as a stdio MCP server. On the --read-only-tmpfs /run, so the images need
-# no mount targets.
+# Teams profiles: the broker's forwarder to Teams for Linux's MCP bridge
+# socket and the relay the agents run as a stdio MCP server. On the
+# --read-only-tmpfs /run, so the images need no mount targets.
 TEAMS_SOCKET_TARGET = "/run/teams-office.sock"
+TEAMS_FORWARDER_NAME = "teams-office.sock"
+TEAMS_CONNECT_TIMEOUT = 2
 TEAMS_RELAY_TARGET = "/run/teams-mcp-relay.py"
 TEAMS_RELAY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "teams-mcp-relay.py")
 # Added to every session a Teams profile opens (ACP stdio server).
@@ -253,7 +257,7 @@ class Policy:
         mid = msg["id"]
         if method not in CLIENT_REQUESTS:
             self.note(f"rejected client request {method!r}")
-            return [], [error(mid, METHOD_NOT_FOUND, f"Method not supported by read-only connector: {method}")]
+            return [], [error(mid, METHOD_NOT_FOUND, f"Method not supported by the connector: {method}")]
         key = id_key(mid)
         if key in self.client_pending or len(self.client_pending) >= MAX_PENDING:
             return [], [error(mid, INVALID_REQUEST, "Duplicate or too many pending requests")]
@@ -326,7 +330,7 @@ class Policy:
         mid = msg["id"]
         if method not in AGENT_REQUESTS:
             self.note(f"blocked agent request {method!r}")
-            return [], [error(mid, METHOD_NOT_FOUND, f"Blocked by read-only connector policy: {method}")]
+            return [], [error(mid, METHOD_NOT_FOUND, f"Blocked by connector policy: {method}")]
         key = id_key(mid)
         if key in self.agent_pending or len(self.agent_pending) >= MAX_PENDING:
             return [], [error(mid, INVALID_REQUEST, "Duplicate or too many pending requests")]
@@ -483,7 +487,8 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
     """The one command a connection may run: a fresh container with ~/Git
     read-write, working in the connection's project, the shared agent home and
     the profile's state. Optional host resources are mounted read-only, except
-    the SSH agent socket and the shared memory."""
+    the SSH agent and Teams sockets and the shared memory. (A read-only bind
+    doesn't restrict a socket: whoever can connect has full access.)"""
     p = PROFILES[profile]
     argv = [*POLICY["run_argv"](interactive=True), "--detach-keys=", f"--name={name}",
             f"--label=acp-connector.profile={profile}",
@@ -510,13 +515,25 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
         argv += [f"--mount=type=bind,src={vm_socket_dir},dst={VM_SOCKET_TARGET},ro=true",
                  f"--mount=type=bind,src={VM_CLIENT},dst={VM_CLIENT_TARGET},ro=true"]
     if teams_socket:
-        argv += [f"--mount=type=bind,src={teams_socket},dst={TEAMS_SOCKET_TARGET},ro=true",
+        argv += [f"--mount=type=bind,src={teams_socket},dst={TEAMS_SOCKET_TARGET}",
                  f"--mount=type=bind,src={TEAMS_RELAY},dst={TEAMS_RELAY_TARGET},ro=true"]
     return argv + [p["image"], p["entry"]]
 
 
+def teams_answers(path):
+    """Whether Teams is listening on its bridge socket. A socket file alone
+    isn't enough: Teams leaves it behind when it crashes."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(TEAMS_CONNECT_TIMEOUT)
+        try:
+            s.connect(path)
+        except OSError as exc:
+            return exc.strerror or str(exc)
+    return None
+
+
 def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_sdk=None, instructions=None,
-                    known_hosts=None, memory=None, vm_socket_dir=None, teams_socket=None):
+                    known_hosts=None, memory=None, vm_socket_dir=None, teams=None):
     def launch(project, name):
         agent = ssh_agent if ssh_agent and os.path.exists(ssh_agent) else None
         if ssh_agent and not agent:
@@ -525,22 +542,89 @@ def podman_launcher(profile, git_root, gitconfig=None, ssh_agent=None, android_s
         if vm_socket_dir and not vm:
             log("VM activation resources missing; starting without VM activation")
         # A Teams thread without Teams is refused rather than started without
-        # it. A file bind pins the socket's inode: a container started before
-        # Teams (re)created it needs a new connection to see the new one.
-        if teams_socket:
-            try:
-                live = stat.S_ISSOCK(os.stat(teams_socket).st_mode)
-            except OSError:
-                live = False
-            if not live:
-                raise LaunchRefused(f"Teams MCP socket {teams_socket} is missing. "
+        # it. The container gets the broker's forwarder, which looks up Teams'
+        # socket on every connection, so a later Teams restart needs only a
+        # new thread.
+        if teams:
+            if teams.problem:
+                raise LaunchRefused(teams.problem)
+            reason = teams_answers(teams.upstream)
+            if reason:
+                raise LaunchRefused(f"Teams MCP socket {teams.upstream} is not answering ({reason}). "
                                     "Start Teams, then start a new thread")
             if not os.path.isfile(TEAMS_RELAY):
                 raise LaunchRefused(f"Teams MCP relay {TEAMS_RELAY} is missing; reinstall the connectors")
         return (podman_argv(profile, name, git_root, project, gitconfig, agent, android_sdk, instructions,
-                            known_hosts, memory, vm, teams_socket),
+                            known_hosts, memory, vm, teams.path if teams else None),
                 [*PODMAN, "rm", "--force", "--ignore", name])
     return launch
+
+
+class TeamsForwarder:
+    """The Teams socket the containers mount. Each connection is passed on to
+    Teams' bridge socket, looked up anew, so containers keep working when
+    Teams recreates that socket. (A bind mount of Teams' own socket pins its
+    inode, and its directory also holds the add-in's TLS key.) Lives as long
+    as the broker, and with it every container that mounts it."""
+
+    def __init__(self, upstream, directory, problem=None):
+        self.upstream = upstream
+        self.problem = problem  # configuration error, shown to Zed on each connection
+        self.directory = directory
+        self.path = os.path.join(directory, TEAMS_FORWARDER_NAME)
+        self.tasks = set()
+        self.server = None
+
+    async def start(self):
+        if self.problem:
+            return
+        old = os.umask(0o177)
+        try:
+            self.server = await asyncio.start_unix_server(self.handle, path=self.path)
+        finally:
+            os.umask(old)
+
+    async def stop(self):
+        if self.server:
+            self.server.close()
+        for t in list(self.tasks):
+            t.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        try:
+            os.unlink(self.path)
+        except FileNotFoundError:
+            pass
+
+    async def handle(self, reader, writer):
+        task = asyncio.current_task()
+        self.tasks.add(task)
+        try:
+            try:
+                up_reader, up_writer = await asyncio.wait_for(
+                    asyncio.open_unix_connection(self.upstream), TEAMS_CONNECT_TIMEOUT)
+            except (OSError, asyncio.TimeoutError) as exc:
+                log(f"[teams] cannot reach {self.upstream}: {exc!r}")
+                return
+            try:
+                await asyncio.gather(self.pipe(reader, up_writer), self.pipe(up_reader, writer))
+            finally:
+                up_writer.close()
+        except Exception as exc:
+            log(f"[teams] error: {exc!r}")
+        finally:
+            writer.close()
+            self.tasks.discard(task)
+
+    @staticmethod
+    async def pipe(src, dst):
+        try:
+            while data := await src.read(65536):
+                dst.write(data)
+                await dst.drain()
+            if dst.can_write_eof():
+                dst.write_eof()
+        except (ConnectionError, OSError):
+            dst.close()
 
 
 class Broker:
@@ -770,7 +854,7 @@ async def remove_stale(profile):
 
 
 async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=None,
-                max_connections=DEFAULT_MAX_CONNECTIONS):
+                max_connections=DEFAULT_MAX_CONNECTIONS, teams=None):
     broker = Broker(launcher, git_root, name, max_connections)
     extra = {}
     if sys.version_info >= (3, 13):
@@ -780,6 +864,8 @@ async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=N
     path = sock.getsockname() if owns_path else None
     if before:
         await before
+    if teams:
+        await teams.start()
     server = await asyncio.start_unix_server(broker.handle, sock=sock, limit=MAX_LINE, **extra)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -792,6 +878,8 @@ async def serve(sock, launcher, git_root, owns_path=True, name="agent", before=N
         for t in list(broker.tasks):
             t.cancel()
         await asyncio.gather(*broker.tasks, return_exceptions=True)
+    if teams:
+        await teams.stop()
     if path:
         try:
             os.unlink(path)
@@ -813,8 +901,8 @@ def main():
     ap.add_argument("--known-hosts", help="SSH host keys git may push to, mounted read-only")
     ap.add_argument("--memory", help="notes directory shared by all agents, mounted read-write at ~/memory")
     ap.add_argument("--vm-socket-dir", help="dedicated VM activation socket directory, mounted read-only")
-    ap.add_argument("--teams-socket", help="Teams for Linux MCP bridge socket, mounted read-only at "
-                    f"{TEAMS_SOCKET_TARGET}; required by the Teams profiles, refused by the others")
+    ap.add_argument("--teams-socket", help="Teams for Linux MCP bridge socket, reachable from the containers at "
+                    f"{TEAMS_SOCKET_TARGET} with full access; required by the Teams profiles, refused by the others")
     # Obsolete now that the whole git root is writable; accepted so an old
     # broker.env still starts.
     ap.add_argument("--writable", action="append", default=[], help=argparse.SUPPRESS)
@@ -828,8 +916,7 @@ def main():
     for opt, path in (("--git-root", git_root), ("--git-config", args.git_config),
                       ("--ssh-agent-socket", args.ssh_agent_socket), ("--android-sdk", args.android_sdk),
                       ("--instructions", args.instructions), ("--known-hosts", args.known_hosts),
-                      ("--memory", args.memory), ("--vm-socket-dir", args.vm_socket_dir),
-                      ("--teams-socket", args.teams_socket)):
+                      ("--memory", args.memory), ("--vm-socket-dir", args.vm_socket_dir)):
         if path is not None and not mount_safe(path):
             ap.error(f"{opt} must be an absolute, normalized path without ',' or '='")
     if not os.path.isdir(git_root):
@@ -845,12 +932,26 @@ def main():
         ap.error("--vm-socket-dir must name a directory")
     if args.writable:
         log("--writable is obsolete and ignored: all of the git root is writable; remove it from broker.env")
+    teams = None
     if PROFILES[args.profile].get("teams"):
-        if not args.teams_socket:
-            ap.error(f"the {args.profile} profile needs --teams-socket"
-                     " (ACP_TEAMS_OPTS in ~/.config/acp-connector/teams.env)")
         if not mount_safe(TEAMS_RELAY):
             ap.error("Teams MCP relay path cannot be mounted safely")
+        # Mistakes in teams.env don't stop the broker: an exit here would only
+        # loop through restarts and show Zed a dropped connection. Each
+        # connection is refused with the reason instead.
+        problem = None
+        if not args.teams_socket or not os.path.isabs(args.teams_socket):
+            problem = ("Teams MCP socket not configured: set ACP_TEAMS_OPTS=\"--teams-socket /absolute/path\" in "
+                       f"~/.config/acp-connector/teams.env, then restart {args.profile}-acp-connector.service")
+            log(problem)
+        # systemd's RuntimeDirectory= (removed when the broker stops); a
+        # private temporary directory when run by hand.
+        directory = os.environ.get("RUNTIME_DIRECTORY") or tempfile.mkdtemp(prefix="acp-teams-")
+        teams = TeamsForwarder(args.teams_socket, directory, problem)
+        if not mount_safe(teams.path):
+            if not os.environ.get("RUNTIME_DIRECTORY"):
+                os.rmdir(directory)
+            ap.error(f"Teams forwarder path {teams.path} cannot be mounted safely")
     elif args.teams_socket:
         ap.error(f"--teams-socket is only for the Teams profiles, not {args.profile};"
                  " put it in ~/.config/acp-connector/teams.env, not broker.env")
@@ -864,9 +965,13 @@ def main():
         sock = bind_socket(args.socket)
     launcher = podman_launcher(args.profile, git_root, args.git_config, args.ssh_agent_socket,
                                args.android_sdk, args.instructions, args.known_hosts, args.memory, args.vm_socket_dir,
-                               args.teams_socket)
-    asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
-                      max_connections=args.max_connections))
+                               teams)
+    try:
+        asyncio.run(serve(sock, launcher, git_root, owns_path, args.profile, remove_stale(args.profile),
+                          max_connections=args.max_connections, teams=teams))
+    finally:
+        if teams and not os.environ.get("RUNTIME_DIRECTORY"):
+            shutil.rmtree(teams.directory, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -197,8 +197,15 @@ if [ "$build" = 1 ]; then
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex
     "$src/acp-connector/tests/host-smoke-test.py" claude
+    # The Teams profiles are optional: tested only where they're enabled.
+    for profile in codex-teams claude-teams; do
+        if systemctl --user -q is-enabled "$profile-acp-connector.socket" 2>/dev/null; then
+            "$src/acp-connector/tests/host-smoke-test.py" "$profile"
+        fi
+    done
     echo "Images rebuilt. Open threads still run the old ones; to switch (ends open threads):"
-    echo "  systemctl --user restart codex-acp-connector.service claude-acp-connector.service"
+    echo "  systemctl --user try-restart codex-acp-connector.service claude-acp-connector.service \\"
+    echo "    codex-teams-acp-connector.service claude-teams-acp-connector.service"
     echo "Old images: $podman image prune"
 fi
 echo "Review and commit: git -C $src diff"
