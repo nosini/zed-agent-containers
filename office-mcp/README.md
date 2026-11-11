@@ -1,7 +1,7 @@
 # Word and Excel MCP servers
 
-Both agent images include two MCP servers. Claude and Codex register them
-as `docx-mcp` and `excel`:
+All agent images include two MCP servers. Claude, Codex and OpenCode
+register them as `docx-mcp` and `excel`:
 
 - [docx-mcp](https://github.com/SecurityRonin/docx-mcp) (`docx-mcp-server`
   on PyPI) creates, reads and edits `.docx` files. It can make tracked
@@ -31,7 +31,8 @@ for each connection. Writing VBA macros stays off (no `--allow-vba-write`).
 - docx-mcp offers 219 tools and the Excel server 42, about 220,000
   characters of tool definitions. Claude Code and Codex (0.163) both load
   MCP tools on demand through tool search, so they don't all go into every
-  request. To cut them down anyway, add `--tools` with a list of areas to
+  request. Neither does OpenCode (2.2.6): with both servers, its first
+  request was about 8,000 input tokens. To cut them down anyway, add `--tools` with a list of areas to
   the Excel server's arguments (see its README), or list the docx tools you
   don't want under `disabled_tools` in Codex's server entry.
 

@@ -16,6 +16,12 @@
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
       "env": { "ACP_CONNECTOR": "claude" }
     },
+    "OpenCode (container)": {
+      "type": "custom",
+      "command": "/usr/bin/python3",
+      "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
+      "env": { "ACP_CONNECTOR": "opencode" }
+    },
     // Optional: the same agents with Teams for Linux's MCP bridge (README).
     "Codex + Teams (container)": {
       "type": "custom",
@@ -28,6 +34,12 @@
       "command": "/usr/bin/python3",
       "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
       "env": { "ACP_CONNECTOR": "claude-teams" }
+    },
+    "OpenCode + Teams (container)": {
+      "type": "custom",
+      "command": "/usr/bin/python3",
+      "args": ["-I", "/home/nosini/.var/app/dev.zed.Zed/data/acp-connector/acp-client.py"],
+      "env": { "ACP_CONNECTOR": "opencode-teams" }
     }
   }
 }

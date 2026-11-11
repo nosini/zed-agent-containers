@@ -1,6 +1,7 @@
 # Zed (Flatpak) ↔ per-project agent containers: ACP connector
 
-Codex (`../codex-container`) and Claude Code (`../claude-container`) run in
+Codex (`../codex-container`), Claude Code (`../claude-container`) and
+OpenCode (`../opencode-container`, for other model providers) run in
 rootless Podman containers. When you open an agent thread on a project in
 Zed, that agent gets:
 
@@ -22,8 +23,9 @@ Flatpak host escape.
 ```
 Zed Flatpak (cwd = project)          host (systemd --user)                       per connection
 acp-client.py                   ──►  $XDG_RUNTIME_DIR/app/dev.zed.Zed/       ──►  podman run --rm -i
- ACP_CONNECTOR=codex|claude           codex-acp.sock  → acp-broker --profile codex   ~/Git:rw, cwd=<project>,
+ ACP_CONNECTOR=codex|claude|opencode  codex-acp.sock  → acp-broker --profile codex   ~/Git:rw, cwd=<project>,
  (stdio ↔ socket, no policy)          claude-acp.sock → acp-broker --profile claude  agent-home, <agent>-agent-state
+                                      opencode-acp.sock → … --profile opencode
 ```
 
 ## How the project is chosen
@@ -39,8 +41,7 @@ The broker reads the connecting client's directory from
 
 Otherwise the connection is refused with an error shown in Zed, e.g. "Open a
 project inside ~/Git". Sessions must then stay inside that project. The
-client never sends a path; it can only choose which of the two agents to
-talk to.
+client never sends a path; it can only choose which agent to talk to.
 
 Each connection gets a fresh `podman run --rm` container: the fixed image,
 adapter and flags, with only the project path varying. Zed runs all of an
@@ -61,21 +62,23 @@ one container.
   hooks and config, which run the next time you use git there. The old
   `--writable` option is ignored (the broker logs a warning); remove it from
   `broker.env`.
-- **Teams:** two extra agents, "Codex + Teams" and "Claude + Teams", give
-  a thread Teams for Linux's MCP bridge; the normal agents never get it.
-  Pick the agent in Zed per thread. Their own brokers (`codex-teams`,
-  `claude-teams`) read `broker.env` like the others, plus
+- **Teams:** extra agents, "Codex + Teams", "Claude + Teams" and
+  "OpenCode + Teams", give a thread Teams for Linux's MCP bridge; the
+  normal agents never get it. Pick the agent in Zed per thread. Their own
+  brokers (`codex-teams`, `claude-teams`, `opencode-teams`) read `broker.env` like the others, plus
   `~/.config/acp-connector/teams.env` with the socket Teams reports:
 
   ```sh
   printf 'ACP_TEAMS_OPTS="--teams-socket %s"\n' "$HOME/.var/app/eu.nosini.TeamsOffice/config/teams-for-linux/mcp/bridge.sock" \
     > ~/.config/acp-connector/teams.env
-  systemctl --user enable --now codex-teams-acp-connector.socket claude-teams-acp-connector.socket
+  systemctl --user enable --now codex-teams-acp-connector.socket claude-teams-acp-connector.socket \
+    opencode-teams-acp-connector.socket
   cd ~/Git/zed-agent-containers/acp-connector  # with Teams running:
-  tests/host-smoke-test.py codex-teams && tests/host-smoke-test.py claude-teams
+  tests/host-smoke-test.py codex-teams && tests/host-smoke-test.py claude-teams &&
+    tests/host-smoke-test.py opencode-teams
   ```
 
-  Then add the two Teams entries from `zed-settings.jsonc`. Only the Teams
+  Then add the Teams entries from `zed-settings.jsonc`. Only the Teams
   brokers accept `--teams-socket`; the others refuse to start with it, so
   keep it out of `broker.env`. A Teams broker with no usable `teams.env`
   keeps running and refuses each connection with the reason, shown in Zed.
@@ -96,13 +99,15 @@ one container.
     needs no restart. Claude Code starts a new relay on the next Teams tool
     call, so its open threads recover once Teams is back. Codex doesn't:
     its open thread keeps failing with "Transport closed", so start a new
-    Codex thread. Teams accepts four MCP connections at a time, so a fifth
+    Codex thread. How OpenCode recovers hasn't been tried yet. Teams
+    accepts four MCP connections at a time, so a fifth
     thread is cut off the same way.
   - **After changing `teams.env`,** restart the Teams brokers on the host
     (this ends open Teams threads), then reconnect the agent in Zed:
 
     ```sh
-    systemctl --user try-restart codex-teams-acp-connector.service claude-teams-acp-connector.service
+    systemctl --user try-restart codex-teams-acp-connector.service claude-teams-acp-connector.service \
+      opencode-teams-acp-connector.service
     ```
 - **Connection limit:** each agent's broker allows 16 concurrent connections
   by default. Open projects can keep connections alive even while their
@@ -114,7 +119,7 @@ one container.
 If the limit is reached, the broker refuses the new connection without
 starting a container. Close an unused project or raise the limit. The
 refusal and configured limit appear in
-`journalctl --user -u codex-acp-connector` (or `claude-acp-connector`). An
+`journalctl --user -u codex-acp-connector` (or `claude-`, `opencode-acp-connector`). An
 unexpected broker disconnect exits the client with status 1 and a log hint;
 closing the editor's input normally exits with status 0.
 
@@ -147,7 +152,8 @@ The agents run commands inside their container.
   use their own `~/.gradle`, not yours, whose `gradle.properties` may hold
   credentials.
 - **Environment note:** `~/.config/acp-connector/agent-environment.md` is
-  mounted read-only as `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, so
+  mounted read-only as `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` and
+  `~/.local/share/opencode/AGENTS.md`, so
   the agents know all this and don't try `sudo apt`. Edit it as you like.
   `install.sh` replaces it with the repo version only while you haven't
   edited it, and otherwise tells you to compare the two.
@@ -161,7 +167,7 @@ The agents run commands inside their container.
 
 `install.sh` creates `~/.local/share/agent-memory`, a git repository on the
 host, and mounts its `notes/` folder read-write at `~/memory` in every
-container, for both agents and all projects. The environment note tells
+container, for all agents and projects. The environment note tells
 the agents to read `~/memory/INDEX.md` when a thread starts, open the notes
 it lists when they're relevant, and save what matters beyond one project:
 your preferences and corrections, machine setup, gotchas. They check for
@@ -253,21 +259,22 @@ Rewrites:
 - **`_meta`** is removed at every depth, in both directions. Every message
   is re-encoded from the parsed object.
 - **Logs** contain method names and decisions only:
-  `journalctl --user -u codex-acp-connector` or `-u claude-acp-connector`.
+  `journalctl --user -u codex-acp-connector` (or `-u claude-…`, `-u opencode-…`).
 
 These editor restrictions matter more now than before: Zed may have broad
 file access, and an agent must not be able to use it.
 
 ## Setup (from a host terminal)
 
-Rebuild both images. They share the build-tools layer, so the second build
-is faster:
+Rebuild the images. They share the build-tools layer, so the later builds
+are faster:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
 C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli"
 (cd ~/Git/zed-agent-containers/codex-container && $P build $C -t localhost/codex-agent:local .)
 (cd ~/Git/zed-agent-containers/claude-container && $P build $C -t localhost/claude-agent:local .)
+(cd ~/Git/zed-agent-containers/opencode-container && $P build $C -t localhost/opencode-agent:local .)
 ```
 
 Install. This also migrates the earlier long-lived containers; their state
@@ -276,8 +283,9 @@ volumes and logins are kept:
 ```sh
 cd ~/Git/zed-agent-containers/acp-connector
 ./install.sh            # check the gitconfig, broker.env and agent-environment.md it reports
-systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket
-tests/host-smoke-test.py codex && tests/host-smoke-test.py claude
+systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket \
+  opencode-acp-connector.socket
+tests/host-smoke-test.py codex && tests/host-smoke-test.py claude && tests/host-smoke-test.py opencode
 ```
 
 If you still need to log in, use a one-off container with the state volume
@@ -292,11 +300,15 @@ $P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   claude-agent-acp --cli auth login --claudeai
 ```
 
+OpenCode logins (ChatGPT, API keys) are in
+[`../opencode-container/README.md`](../opencode-container/README.md#state-and-login).
+
 Zed entries: see `zed-settings.jsonc` (already added to your settings).
 
 **Then, in this order:**
-1. Remove Zed's unrestricted agents: the registry `codex-acp` and
-   `claude-acp` entries, and don't use Zed's built-in agent. They run with
+1. Remove Zed's unrestricted agents: the registry `codex-acp`,
+   `claude-acp`, OpenCode and Mistral Vibe entries, and don't use Zed's
+   built-in agent (or its Mistral and other language model providers). They run with
    Zed's own permissions.
 2. Loosen Zed's filesystem permissions in Flatseal as you like.
 3. Optionally turn off host escape:
@@ -322,7 +334,7 @@ socket to the broker:
     `~/Git` to outside, paths with a comma, and `/`. No agent starts for a
     refused project.
   - A session in a sibling project is rejected.
-- **Container command:** for both profiles, the exact `podman run` flags
+- **Container command:** for every profile, the exact `podman run` flags
   and mount set are checked: `~/Git` rw, agent home, state
   volume, and the optional gitconfig, Android SDK, environment note and
   push host keys (all ro, the last with its `GIT_SSH_COMMAND`), agent
@@ -345,7 +357,7 @@ socket to the broker:
   and sockets are 0600.
 - **Socket activation:** the broker does not unlink the systemd-owned
   socket path.
-- **Teams:** both Teams profiles mount the broker's 0600 forwarder socket
+- **Teams:** all Teams profiles mount the broker's 0600 forwarder socket
   and the relay, never Teams' own socket, and inject only the `teams-office`
   server. The relay copies both ways; a Teams socket that is missing,
   left behind by a crash or not a socket refuses the connection; a missing
@@ -359,7 +371,14 @@ socket to the broker:
 
 ## Not tested here / remaining limitations
 
-- **Verified on the host** (`tests/host-smoke-test.py`, both agents, all
+- **OpenCode** (2.2.6) hasn't been through the broker on the host yet
+  (`tests/host-smoke-test.py opencode`). Its image was built on the agent VM
+  and run with the broker's flags and mounts: the handshake, sessions, the
+  instructions file, `/etc/opencode` config and Skill, the Word and Excel
+  servers, the state volume and a shell tool without permission requests
+  all worked. The injected Teams server was checked outside a container,
+  with a mock MCP server.
+- **Verified on the host** (`tests/host-smoke-test.py`, Codex and Claude, all
   passing): images with build tools and Java, per-connection containers
   with the expected mounts, `~/Git` rw, writable agent home, no host home, git identity,
   SSH agent forwarding, refusal of

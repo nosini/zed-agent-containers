@@ -1,8 +1,8 @@
 # Univer Workspace CLI in the agent images
 
-Both agent images include `uvw`, the [Univer Workspace CLI](https://github.com/dream-num/univer-workspace/tree/main/apps/cli)
+All agent images include `uvw`, the [Univer Workspace CLI](https://github.com/dream-num/univer-workspace/tree/main/apps/cli)
 (npm package `univer-workspace-cli`; `univer-workspace-cli` is a second name
-for the same command). With it, Codex and Claude can work on a Univer
+for the same command). With it, Codex, Claude and OpenCode can work on a Univer
 Workspace, such as your own deployment: find files in your Spaces, edit
 Sheets, Docs, Slides, Bases and Boards in a reviewable Worktree (a pull
 request), render them and export Office files. The agent uses its usual
@@ -25,7 +25,7 @@ the way you normally do, check that the code matches and approve. Then tell
 the agent, which finishes with `uvw auth login --complete`. No password
 or browser cookie passes through the agent.
 
-Each agent has its own login: do this once for Codex and once for Claude.
+Each agent has its own login: do this once for each agent you use it with.
 You can also log in from a host terminal, in two steps:
 
 ```sh
@@ -39,7 +39,8 @@ $P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
 ```
 
 For Claude, use `claude-agent-state`, `/home/node/.claude` and
-`localhost/claude-agent:local`.
+`localhost/claude-agent:local`; for OpenCode, `opencode-agent-state`,
+`/home/node/.local/share/opencode` and `localhost/opencode-agent:local`.
 
 ## Using it
 
@@ -60,13 +61,15 @@ have, such as Chinese, Japanese or Korean, renders with fallback fonts.
 ## Where the login is kept
 
 `UNIVER_HOME` points into the agent's state volume:
-`/home/node/.codex/univer-workspace` in `codex-agent-state` and
-`/home/node/.claude/univer-workspace` in `claude-agent-state`. That holds
+`/home/node/.codex/univer-workspace` in `codex-agent-state`,
+`/home/node/.claude/univer-workspace` in `claude-agent-state` and
+`/home/node/.local/share/opencode/univer-workspace` in
+`opencode-agent-state`. That holds
 the configured origin and the Workspace session (`session.json`, readable
 only by you). It survives image rebuilds and new containers.
 
 - Every thread of that agent can use the login, in every project, including
-  the "+ Teams" variant of the agent. The other agent can't.
+  the "+ Teams" variant of the agent. The other agents can't.
 - It is a sign-in to your Workspace: whatever runs in that agent's
   containers can read and change what your account can. `uvw auth logout`
   in a thread ends the session.
@@ -99,7 +102,8 @@ npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 Workspace repository, at the release tag of the pinned CLI (now `v0.6.0`).
 When the pin moves, replace it with the file from the new tag. The images
 put it where each agent reads skills shared by all users
-(`/etc/codex/skills` and `/etc/claude-code/.claude/skills`), so it never
+(`/etc/codex/skills`, `/etc/claude-code/.claude/skills` and
+`/etc/opencode/skills`), so it never
 touches the skills in your state volumes.
 
 ## Known issues

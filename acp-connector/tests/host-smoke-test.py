@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """Host smoke test for an installed connector:
-host-smoke-test.py codex|claude|codex-teams|claude-teams [PROJECT]
+host-smoke-test.py codex|claude|opencode|codex-teams|claude-teams|opencode-teams [PROJECT]
 
 Run from a HOST terminal after install.sh, rebuilding the images and enabling
 the <agent>-acp-connector.socket units. PROJECT defaults to this repository.
@@ -17,8 +17,12 @@ import subprocess
 import sys
 import time
 
-AGENTS = {"codex": ("@agentclientprotocol/codex-acp", "/home/node/.codex"),
-          "claude": ("@agentclientprotocol/claude-agent-acp", "/home/node/.claude")}
+# Adapter name in the handshake, state volume, instructions file in it, and
+# the image's Skill directory.
+AGENTS = {"codex": ("@agentclientprotocol/codex-acp", "/home/node/.codex", "AGENTS.md", "/etc/codex/skills"),
+          "claude": ("@agentclientprotocol/claude-agent-acp", "/home/node/.claude", "CLAUDE.md",
+                     "/etc/claude-code/.claude/skills"),
+          "opencode": ("OpenCode", "/home/node/.local/share/opencode", "AGENTS.md", "/etc/opencode/skills")}
 AGENTS.update({f"{a}-teams": AGENTS[a] for a in list(AGENTS)})
 MCP_INIT = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
     "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "host-smoke-test", "version": "1"}}})
@@ -73,7 +77,7 @@ def main():
     agent = sys.argv[1]
     repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
     project = os.path.realpath(sys.argv[2] if len(sys.argv) == 3 else repo)
-    adapter, state = AGENTS[agent]
+    adapter, state, instructions, skills = AGENTS[agent]
     teams = agent.endswith("-teams")
     sock = f"/run/user/{os.getuid()}/app/dev.zed.Zed/{agent}-acp.sock"
 
@@ -108,7 +112,7 @@ def main():
                     "/opt/agent-vm:false", "/opt/agent-vm-client.py:false",
                     "/opt/agent-git/known_hosts:false", "/home/node/memory:true",
                     f"{HOME}/Android/Sdk:false",
-                    f"{state}/{'AGENTS.md' if agent.startswith('codex') else 'CLAUDE.md'}:false"}
+                    f"{state}/{instructions}:false"}
         if teams:
             expected |= {"/run/teams-office.sock:true", "/run/teams-mcp-relay.py:false"}
         extra = mounts - expected - optional
@@ -149,8 +153,7 @@ def main():
         check("Word and Excel MCP servers load", office.returncode == 0, office.stderr[-200:])
         # Offline: no Workspace request, no login. Its settings and login
         # belong in the agent's state volume, not the shared home.
-        skill = ("/etc/codex/skills" if agent.startswith("codex") else "/etc/claude-code/.claude/skills") + \
-            "/univer-workspace-cli/SKILL.md"
+        skill = f"{skills}/univer-workspace-cli/SKILL.md"
         uvw = inside(f'test "$UNIVER_HOME" = {state}/univer-workspace && test -r {skill} '
                      "&& bash -lc 'uvw --version' && univer-workspace-cli --version "
                      "&& uvw skills get core >/dev/null")

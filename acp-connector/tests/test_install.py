@@ -27,6 +27,8 @@ class InstallTest(unittest.TestCase):
                      "codex-acp-connector.service", "claude-acp-connector.socket", "claude-acp-connector.service",
                      "codex-teams-acp-connector.socket", "codex-teams-acp-connector.service",
                      "claude-teams-acp-connector.socket", "claude-teams-acp-connector.service",
+                     "opencode-acp-connector.socket", "opencode-acp-connector.service",
+                     "opencode-teams-acp-connector.socket", "opencode-teams-acp-connector.service",
                      "teams-mcp-relay.py"):
             text = (SOURCE / name).read_text()
             if name == "install.sh":
@@ -35,7 +37,7 @@ class InstallTest(unittest.TestCase):
         (self.source / "install.sh").chmod(0o755)
         (self.repo / "install.sh").write_text((SOURCE.parent / "install.sh").read_text().replace(
             "/run/acp-agent-vm", str(self.vm)))
-        for profile in ("codex", "claude"):
+        for profile in ("codex", "claude", "opencode"):
             directory = self.repo / (profile + "-container")
             directory.mkdir()
             shutil.copy(SOURCE.parent / (profile + "-container") / (profile + "-agent-state.volume"), directory)
@@ -85,11 +87,13 @@ class InstallTest(unittest.TestCase):
         self.assertNotEqual(self.installed.read_text(), "previous broker")
         self.assertTrue((self.installed.parent / "container-policy.py").is_file())
         self.assertIn("--vm-socket-dir " + str(self.vm), self.options.read_text())
-        self.assertEqual(self.events.read_text().splitlines()[-5:], ["--user daemon-reload",
+        self.assertEqual(self.events.read_text().splitlines()[-7:], ["--user daemon-reload",
                          "--user try-restart codex-acp-connector.service",
                          "--user try-restart claude-acp-connector.service",
+                         "--user try-restart opencode-acp-connector.service",
                          "--user try-restart codex-teams-acp-connector.service",
-                         "--user try-restart claude-teams-acp-connector.service"])
+                         "--user try-restart claude-teams-acp-connector.service",
+                         "--user try-restart opencode-teams-acp-connector.service"])
         # Teams stays opt-in: units are installed but nothing enables them.
         units = self.home / ".config/systemd/user"
         self.assertTrue((units / "codex-teams-acp-connector.socket").is_file())
@@ -101,8 +105,8 @@ class InstallTest(unittest.TestCase):
             with self.subTest(flags=flags):
                 result = self.run_install(0, "--no-build", "--no-test", *flags, top=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("--user enable --now codex-acp-connector.socket claude-acp-connector.socket",
-                              self.events.read_text())
+                self.assertIn("--user enable --now codex-acp-connector.socket claude-acp-connector.socket "
+                              "opencode-acp-connector.socket", self.events.read_text())
                 self.assertIn("--vm-socket-dir " + str(self.vm), self.options.read_text())
 
 

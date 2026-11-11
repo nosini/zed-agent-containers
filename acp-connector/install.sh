@@ -1,5 +1,6 @@
 #!/bin/sh
-# Install the ACP connectors (Codex and Claude Code, each also with Teams).
+# Install the ACP connectors (Codex, Claude Code and OpenCode, each also with
+# Teams).
 # Run from a HOST terminal (not in Zed). Copies (never symlinks) host-side
 # code out of ~/Git. Re-run after changing any of these files. Never
 # overwrites your edits to ~/.config/acp-connector/{gitconfig,broker.env,
@@ -64,7 +65,7 @@ install -m 555 "$src/acp-broker.py" "$libexec/"
 install -m 555 "$src/teams-mcp-relay.py" "$libexec/"
 install -m 755 "$src/acp-client.py" "$client/"
 install -d -m 755 "$units" "$quadlets"
-for agent in codex claude; do
+for agent in codex claude opencode; do
     for profile in "$agent" "$agent-teams"; do
         install -m 644 "$src/$profile-acp-connector.socket" "$src/$profile-acp-connector.service" "$units/"
     done
@@ -201,12 +202,13 @@ if [ -d "$HOME/Android/Sdk" ]; then add_opt --android-sdk "$HOME/Android/Sdk"; f
 echo "Broker options: $(cat "$settings/broker.env")"
 
 systemctl --user daemon-reload
-for profile in codex claude codex-teams claude-teams; do
+for profile in codex claude opencode codex-teams claude-teams opencode-teams; do
     systemctl --user try-restart "$profile-acp-connector.service"
 done
 echo "Installed. If not done yet:"
-echo "  systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket"
+echo "  systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket \\"
+echo "    opencode-acp-connector.socket"
 if [ ! -e "$settings/teams.env" ]; then
     echo "Teams profiles are optional and off; see acp-connector/README.md to set up $settings/teams.env."
 fi
-echo "Rebuild both images after Containerfile changes (see the READMEs)."
+echo "Rebuild the images after Containerfile changes (see the READMEs)."

@@ -1,0 +1,28 @@
+[Unit]
+Description=ACP broker: Zed (Flatpak) to OpenCode with Teams in per-project containers
+Requires=opencode-teams-acp-connector.socket
+After=opencode-teams-acp-connector.socket
+# Create the opencode-agent-state and shared agent-home volumes (Quadlet) if needed.
+Wants=opencode-agent-state-volume.service agent-home-volume.service
+After=opencode-agent-state-volume.service agent-home-volume.service
+
+[Service]
+Type=simple
+# The same options as the opencode profile, plus Teams for Linux's MCP bridge,
+# which only the Teams profiles accept:
+#   teams.env: ACP_TEAMS_OPTS="--teams-socket S"
+EnvironmentFile=-%h/.config/acp-connector/broker.env
+EnvironmentFile=-%h/.config/acp-connector/teams.env
+# Installed outside ~/Git so project files can't change host code.
+# Each Zed connection gets a fresh container: ~/Git read-write, working in
+# the project Zed started the agent in, and full access to the Teams bridge
+# through the broker's forwarder socket in the runtime directory below.
+# A missing or broken teams.env doesn't stop the broker; it refuses each
+# connection with the reason, shown in Zed.
+RuntimeDirectory=opencode-teams-acp-connector
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 -I %h/.local/libexec/acp-connector/acp-broker.py --profile opencode-teams --git-root %h/Git $ACP_BROKER_OPTS $ACP_TEAMS_OPTS
+UMask=0077
+Restart=on-failure
+# No NoNewPrivileges: rootless Podman may need setuid newuidmap.
+# No Install section: activated by opencode-teams-acp-connector.socket.

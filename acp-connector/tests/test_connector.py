@@ -331,8 +331,9 @@ class ThreadTitleTests(unittest.TestCase):
 
     def test_production_profiles_have_labels(self):
         self.assertEqual({k: v["label"] for k, v in self.broker.PROFILES.items()},
-                         {"codex": "Codex", "claude": "Claude",
-                          "codex-teams": "Codex + Teams", "claude-teams": "Claude + Teams"})
+                         {"codex": "Codex", "claude": "Claude", "opencode": "OpenCode",
+                          "codex-teams": "Codex + Teams", "claude-teams": "Claude + Teams",
+                          "opencode-teams": "OpenCode + Teams"})
 
 
 class TeamsPolicyTests(unittest.TestCase):
@@ -405,7 +406,7 @@ class TeamsPolicyTests(unittest.TestCase):
 
     def test_only_teams_profiles_are_marked(self):
         self.assertEqual({k for k, v in self.broker.PROFILES.items() if v.get("teams")},
-                         {"codex-teams", "claude-teams"})
+                         {"codex-teams", "claude-teams", "opencode-teams"})
 
 
 class LifecycleTests(BrokerTest):
@@ -581,7 +582,9 @@ class ActivationTest(BrokerTest):
             s.bind(agent_sock)
         for profile, image, entry, state, notes_dst in (
                 ("codex", "codex-agent", "codex-acp", "/home/node/.codex", "/home/node/.codex/AGENTS.md"),
-                ("claude", "claude-agent", "claude-agent-acp", "/home/node/.claude", "/home/node/.claude/CLAUDE.md")):
+                ("claude", "claude-agent", "claude-agent-acp", "/home/node/.claude", "/home/node/.claude/CLAUDE.md"),
+                ("opencode", "opencode-agent", "opencode-acp", "/home/node/.local/share/opencode",
+                 "/home/node/.local/share/opencode/AGENTS.md")):
             with self.subTest(profile=profile):
                 if os.path.exists(self.sock):
                     os.unlink(self.sock)
@@ -685,7 +688,9 @@ class ActivationTest(BrokerTest):
         teams_sock = os.path.join(self.tmp, "bridge.sock")
         self.teams_server(teams_sock)
         relay = os.path.abspath(os.path.join(HERE, "..", "teams-mcp-relay.py"))
-        for profile, image in (("codex-teams", "codex-agent"), ("claude-teams", "claude-agent")):
+        for profile, image, state in (("codex-teams", "codex-agent", "/home/node/.codex"),
+                                      ("claude-teams", "claude-agent", "/home/node/.claude"),
+                                      ("opencode-teams", "opencode-agent", "/home/node/.local/share/opencode")):
             with self.subTest(profile=profile):
                 if os.path.exists(self.sock):
                     os.unlink(self.sock)
@@ -702,7 +707,7 @@ class ActivationTest(BrokerTest):
                 for mount in (f"--mount=type=bind,src={forwarder},dst=/run/teams-office.sock",
                               f"--mount=type=bind,src={relay},dst=/run/teams-mcp-relay.py,ro=true",
                               f"--label=acp-connector.profile={profile}",
-                              f"--mount=type=volume,src={image}-state,dst=/home/node/{'.' + profile.split('-')[0]}"):
+                              f"--mount=type=volume,src={image}-state,dst={state}"):
                     self.assertIn(mount, argv)
                 self.assertNotIn(teams_sock, " ".join(argv), "Teams' own socket must not be mounted")
                 self.assertEqual(oct(os.stat(forwarder).st_mode & 0o777), "0o600")

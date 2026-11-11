@@ -2,7 +2,7 @@
 # Update the agent images: move the pinned npm packages (the agents and the
 # Univer Workspace CLI) and the Word and Excel MCP servers (PyPI) to their
 # newest releases that are at least 3 days old, and the Node base image
-# digest to the latest, then rebuild both images without cache so the
+# digest to the latest, then rebuild the images without cache so the
 # Debian packages are refreshed too. Run from a
 # HOST terminal, after a first ./install.sh: the MCP servers are locked with
 # the Python in the Codex image.
@@ -112,8 +112,10 @@ codex_pick=$(pick @openai/codex "$(pinned codex-container @openai/codex)")
 codex_acp_pick=$(pick @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)")
 claude_acp_pick=$(pick @agentclientprotocol/claude-agent-acp \
     "$(pinned claude-container @agentclientprotocol/claude-agent-acp)")
+opencode_pick=$(pick @opencode/cli "$(pinned opencode-container @opencode/cli)")
 uvw_pick=$(pick univer-workspace-cli "$(pinned univer-cli univer-workspace-cli)")
 codex=${codex_pick%% *} codex_acp=${codex_acp_pick%% *} claude_acp=${claude_acp_pick%% *}
+opencode=${opencode_pick%% *}
 uvw=${uvw_pick%% *}
 docx_pick=$(pypi_pick docx-mcp-server "$(pypi_pinned docx.txt docx-mcp-server)")
 excel_pick=$(pypi_pick excel-mcp-server "$(pypi_pinned excel.txt excel-mcp-server)")
@@ -136,6 +138,7 @@ row @openai/codex "$(pinned codex-container @openai/codex)" "$codex_pick"
 row @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)" "$codex_acp_pick"
 row @agentclientprotocol/claude-agent-acp "$(pinned claude-container @agentclientprotocol/claude-agent-acp)" \
     "$claude_acp_pick"
+row @opencode/cli "$(pinned opencode-container @opencode/cli)" "$opencode_pick"
 row univer-workspace-cli "$(pinned univer-cli univer-workspace-cli)" "$uvw_pick"
 row "docx-mcp-server (PyPI)" "$(pypi_pinned docx.txt docx-mcp-server)" "$docx_pick"
 row "excel-mcp-server (PyPI)" "$(pypi_pinned excel.txt excel-mcp-server)" "$excel_pick"
@@ -159,6 +162,7 @@ echo "== Updating pins"
 npm_in "$src/codex-container" pkg set "dependencies.@openai/codex=$codex" \
     "overrides.@openai/codex=$codex" "dependencies.@agentclientprotocol/codex-acp=$codex_acp"
 npm_in "$src/claude-container" pkg set "dependencies.@agentclientprotocol/claude-agent-acp=$claude_acp"
+npm_in "$src/opencode-container" pkg set "dependencies.@opencode/cli=$opencode"
 npm_in "$src/univer-cli" pkg set "dependencies.univer-workspace-cli=$uvw"
 # The other dependencies resolve as of the cutoff too. npm refuses pins
 # newer than --before, so a pin kept from an earlier, newer choice moves
@@ -166,11 +170,13 @@ npm_in "$src/univer-cli" pkg set "dependencies.univer-workspace-cli=$uvw"
 later() { if [ "$1" \> "$2" ]; then echo "$1"; else echo "$2"; fi; }
 codex_before=$(later "$(later "$cutoff" "${codex_pick##* }")" "${codex_acp_pick##* }")
 claude_before=$(later "$cutoff" "${claude_acp_pick##* }")
+opencode_before=$(later "$cutoff" "${opencode_pick##* }")
 uvw_before=$(later "$cutoff" "${uvw_pick##* }")
-for lock_dir in codex-container claude-container univer-cli; do
+for lock_dir in codex-container claude-container opencode-container univer-cli; do
     case $lock_dir in
         codex-container) before=$codex_before ;;
         claude-container) before=$claude_before ;;
+        opencode-container) before=$opencode_before ;;
         univer-cli) before=$uvw_before ;;
     esac
     [ "$min_age" = 0 ] && before=
@@ -178,7 +184,7 @@ for lock_dir in codex-container claude-container univer-cli; do
     npm_in "$src/$lock_dir" install --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
     npm_in "$src/$lock_dir" update --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
 done
-for image_dir in codex-container claude-container; do
+for image_dir in codex-container claude-container opencode-container; do
     sed -i "s|^FROM $base@sha256:[0-9a-f]*|FROM $base@$digest|" "$src/$image_dir/Containerfile"
 done
 # The MCP servers' dependencies, hash-pinned for the images' Python 3.11, by
@@ -195,7 +201,7 @@ $podman run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 --security-
 git -C "$src" --no-pager diff --stat
 
 if [ "$build" = 1 ]; then
-    # Only the first build skips the cache: the second then reuses its fresh
+    # Only the first build skips the cache: the others then reuse its fresh
     # Debian layer, which keeps that layer shared between the images.
     step="building localhost/codex-agent:local"
     echo "== Building localhost/codex-agent:local"
@@ -207,19 +213,26 @@ if [ "$build" = 1 ]; then
     (cd "$src/claude-container" && $podman build \
         --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
         -t localhost/claude-agent:local .)
+    step="building localhost/opencode-agent:local"
+    echo "== Building localhost/opencode-agent:local"
+    (cd "$src/opencode-container" && $podman build \
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        -t localhost/opencode-agent:local .)
     step="running the smoke tests"
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex
     "$src/acp-connector/tests/host-smoke-test.py" claude
+    "$src/acp-connector/tests/host-smoke-test.py" opencode
     # The Teams profiles are optional: tested only where they're enabled.
-    for profile in codex-teams claude-teams; do
+    for profile in codex-teams claude-teams opencode-teams; do
         if systemctl --user -q is-enabled "$profile-acp-connector.socket" 2>/dev/null; then
             "$src/acp-connector/tests/host-smoke-test.py" "$profile"
         fi
     done
     echo "Images rebuilt. Open threads still run the old ones; to switch (ends open threads):"
     echo "  systemctl --user try-restart codex-acp-connector.service claude-acp-connector.service \\"
-    echo "    codex-teams-acp-connector.service claude-teams-acp-connector.service"
+    echo "    opencode-acp-connector.service codex-teams-acp-connector.service \\"
+    echo "    claude-teams-acp-connector.service opencode-teams-acp-connector.service"
     echo "Old images: $podman image prune"
 fi
 echo "Review and commit: git -C $src diff"

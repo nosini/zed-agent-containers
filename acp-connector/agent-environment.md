@@ -17,13 +17,13 @@ directly on the user's machine.
   and the guidance from `uvw skills get core`. If no Workspace origin is
   configured, ask the user for theirs instead of using the default service.
   Its login lives in your state volume (`UNIVER_HOME`), separate from the
-  other agent's; never print `session.json`.
+  other agents'; never print `session.json`.
 - The `docx-mcp` and `excel` MCP servers run in this container. Use them to
   read and edit Word (`.docx`) and Excel (`.xlsx`, `.xlsm`) files; they see
   the same files you do. docx-mcp's `scrub_pii` and PDF export are not
   available (no spaCy, no LibreOffice).
 - Your home, `/home/node`, is writable and persists between sessions. It's
-  shared with the other agent.
+  shared with the other agents.
   - Keep each project's temporary files, reviews, logs, source copies,
     local builds and project-specific virtualenvs under `~/PROJECT`, using
     the repository's name: for example, `~/scopevault/tmp`,
@@ -130,7 +130,7 @@ to this container and the user's desktop.
   the source and artifacts needed for the task. Collect results and any
   intended source changes back into the project, and clean completed runs
   without removing other agents' work. The VM has no desktop home share.
-- Both agents share the VM. Check for other active work before reboots,
+- All agents share the VM. Check for other active work before reboots,
   service restarts or system changes that could interrupt it. Preserve a
   recovery path for boot/encryption tests: a root filesystem snapshot does
   not back up the EFI partition, firmware NVRAM or virtual TPM state.

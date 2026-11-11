@@ -55,13 +55,18 @@ PROFILES = {
     "claude": {"image": "localhost/claude-agent:local", "entry": "claude-agent-acp", "label": "Claude",
                "volume": "claude-agent-state", "state": "/home/node/.claude",
                "instructions": "/home/node/.claude/CLAUDE.md"},
+    # OpenCode's data directory holds its logins and sessions; its config is
+    # in the image (/etc/opencode), which reads the instructions from here.
+    "opencode": {"image": "localhost/opencode-agent:local", "entry": "opencode-acp", "label": "OpenCode",
+                 "volume": "opencode-agent-state", "state": "/home/node/.local/share/opencode",
+                 "instructions": "/home/node/.local/share/opencode/AGENTS.md"},
 }
 # The same agents with Teams for Linux's MCP bridge. Separate profiles with
 # their own sockets, so Teams access is chosen per Zed thread (by picking the
 # agent) while the host alone decides what that agent gets.
-for _base, _label in (("codex", "Codex + Teams"), ("claude", "Claude + Teams")):
+for _base, _label in (("codex", "Codex + Teams"), ("claude", "Claude + Teams"), ("opencode", "OpenCode + Teams")):
     PROFILES[f"{_base}-teams"] = {**PROFILES[_base], "label": _label, "teams": True}
-# Writable home shared by both agents: toolchains they install, build caches.
+# Writable home shared by all agents: toolchains they install, build caches.
 HOME_VOLUME = "agent-home"
 VM_SOCKET_TARGET = "/opt/agent-vm"
 VM_CLIENT_TARGET = "/opt/agent-vm-client.py"

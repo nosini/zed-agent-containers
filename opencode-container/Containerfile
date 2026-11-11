@@ -1,0 +1,87 @@
+# Official Node 22 bookworm-slim, pinned to the manifest verified during setup.
+FROM docker.io/library/node:22-bookworm-slim@sha256:efd0ab5780c2d9ab1f0f869571a00d5edb17793bff4cce4a2792e3eb0ffc7562
+
+USER root
+# Keep this step identical in both agent images so the layer is shared.
+# Build tools for testing/building projects; agents add other toolchains
+# (rustup, uv, Go) to their writable home at runtime.
+# Chromium renders Univer Workspace screenshots and PDFs (uvw, below).
+# (slim images lack man1, which the OpenJDK package scripts need)
+RUN mkdir -p /usr/share/man/man1 \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates git ripgrep openssh-client curl procps file less \
+      zip unzip xz-utils bzip2 build-essential pkg-config libssl-dev meson ninja-build \
+      python3 python3-dev python3-venv python3-pip python3-packaging python3-yaml \
+      node-jsdom \
+      openjdk-17-jdk-headless \
+      flatpak-builder rpm \
+      chromium fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
+
+# The Word and Excel MCP servers, each in its own venv (docx-mcp needs the
+# mcp 1.x API, excel-mcp-server 2.x), from the hash-pinned wheels in
+# ../office-mcp (build with --build-context office-mcp=../office-mcp).
+# Also identical in both images, so this layer is shared too.
+COPY --from=office-mcp docx.txt excel.txt /opt/office-mcp/
+RUN for server in docx excel; do \
+      python3 -m venv /opt/office-mcp/$server \
+      && /opt/office-mcp/$server/bin/pip install --no-cache-dir --disable-pip-version-check \
+           --no-deps --require-hashes --only-binary=:all: -r /opt/office-mcp/$server.txt \
+      || exit 1; \
+    done
+
+# The Univer Workspace CLI (uvw), pinned with its dependencies in
+# ../univer-cli (build with --build-context univer-cli=../univer-cli). Its
+# native parts are prebuilt packages, so no install scripts run. Linked into
+# /usr/local/bin, which login shells keep on PATH. Identical in both images.
+WORKDIR /opt/univer-workspace-cli
+COPY --from=univer-cli package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && npm cache clean --force \
+ && ln -s /opt/univer-workspace-cli/node_modules/.bin/uvw \
+      /opt/univer-workspace-cli/node_modules/.bin/univer-workspace-cli /usr/local/bin/
+
+WORKDIR /opt/agent
+COPY package.json package-lock.json ./
+# @opencode/cli's launcher is a stub that its install script replaces with the
+# platform binary. Scripts are disabled, so link the locked glibc x64 binary
+# (the image is amd64, like JAVA_HOME below) and drop the other variants.
+RUN npm ci --omit=dev --ignore-scripts \
+ && npm cache clean --force \
+ && ln -f node_modules/@opencode/cli-linux-x64/bin/opencode node_modules/@opencode/cli/bin/opencode.exe \
+ && rm -rf node_modules/@opencode/cli-linux-x64-* \
+ && node_modules/.bin/opencode --version
+# The broker starts one command per connection.
+RUN printf '#!/bin/sh\nexec opencode acp "$@"\n' > /usr/local/bin/opencode-acp \
+ && chmod 755 /usr/local/bin/opencode-acp
+
+# Pinned adapters first, then toolchains the agents install into their home.
+ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/bin:/home/node/.local/go/bin:/home/node/go/bin:${PATH}" \
+    NPM_CONFIG_PREFIX=/home/node/.local \
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+    HOME=/home/node \
+    UNIVER_HOME=/home/node/.local/share/opencode/univer-workspace \
+    UNIVER_RENDER_BROWSER=/usr/bin/chromium \
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
+    NO_BROWSER=1 \
+    GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
+
+# Mount targets for the connector's optional gitconfig, SSH agent socket and
+# push host keys
+# (the root filesystem is read-only at runtime).
+RUN mkdir -p /opt/agent-git \
+ && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock /opt/agent-git/known_hosts
+RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
+# Machine-wide OpenCode configuration and the Workspace CLI's discovery Skill,
+# from the Univer release that uvw is pinned to. In the image, not the state
+# volume, so rebuilds update them. OpenCode reads both from /etc/opencode.
+COPY opencode.json /etc/opencode/opencode.json
+COPY --from=univer-cli SKILL.md /etc/opencode/skills/univer-workspace-cli/SKILL.md
+# OpenCode's data directory (logins, sessions) is the state volume.
+RUN mkdir -p /home/node/.local/share/opencode /workspace \
+ && chown -R node:node /home/node/.local
+USER node
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["opencode-acp"]

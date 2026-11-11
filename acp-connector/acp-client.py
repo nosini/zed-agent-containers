@@ -6,7 +6,7 @@ between stdio and the dedicated Unix socket. All ACP policy is enforced by
 the host broker, so this file carries no security decisions. It takes no
 arguments: Zed must not be able to re-invoke it with auth or command input.
 The Zed entry selects the connector with env ACP_CONNECTOR (codex, claude,
-codex-teams or claude-teams);
+opencode, or one of them with -teams);
 each socket is bound to one fixed container on the host.
 """
 

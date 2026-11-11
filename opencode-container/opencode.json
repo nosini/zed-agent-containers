@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "update": "disable",
+  "share": "disabled",
+  "permissions": [
+    { "action": "*", "resource": "*", "effect": "allow" }
+  ],
+  "instructions": ["/home/node/.local/share/opencode/AGENTS.md"],
+  "mcp": {
+    "servers": {
+      "rea": {
+        "type": "local",
+        "command": ["ssh", "-T", "-F", "/home/node/.ssh/agent-vm.conf", "agent-vm", "/usr/local/bin/rea", "mcp"],
+        "timeout": { "startup": 600000, "execution": 1200000 }
+      },
+      "docx-mcp": {
+        "type": "local",
+        "command": ["/opt/office-mcp/docx/bin/python3", "-m", "docx_mcp.server"]
+      },
+      "excel": {
+        "type": "local",
+        "command": ["/opt/office-mcp/excel/bin/excel-mcp-server", "stdio"]
+      }
+    }
+  }
+}

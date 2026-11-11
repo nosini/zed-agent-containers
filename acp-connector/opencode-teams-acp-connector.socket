@@ -1,0 +1,14 @@
+[Unit]
+Description=ACP socket for Zed (Flatpak) to the OpenCode agent containers with Teams
+
+[Socket]
+# Zed's per-app runtime directory: visible inside the Flatpak without
+# extra permissions, invisible to other Flatpak apps and to the container.
+ListenStream=%t/app/dev.zed.Zed/opencode-teams-acp.sock
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+Accept=no
+
+[Install]
+WantedBy=sockets.target
