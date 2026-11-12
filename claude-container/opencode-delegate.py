@@ -9,7 +9,7 @@ in the directory the worker should change, normally a git worktree:
     opencode-delegate login | status | models   OpenCode Go login (host terminal)
 
 The worker's full JSON transcript goes to a log file; stdout gets only the
-session ID, the worker's final report, cost and the git summary, so the
+session ID, the worker's final report, token usage and the git summary, so the
 orchestrator doesn't pay to read the whole transcript.
 """
 
@@ -97,8 +97,12 @@ def delegate(args):
     session, texts, errors, cost, tokens = summarize(log)
     print(f"session: {session}  model: {args.model}  exit: {rc}")
     print(f"log: {log}")
-    if cost or tokens:
-        print("cost: $%.4f  tokens: %s" % (cost, ", ".join(f"{k} {v}" for k, v in tokens.items())))
+    # OpenCode Go is a subscription and reports no cost; show it only if set.
+    usage = ", ".join(f"{k} {v}" for k, v in tokens.items())
+    if cost:
+        usage = "cost $%.4f, %s" % (cost, usage)
+    if usage:
+        print(f"usage: {usage}")
     for message in errors:
         print(f"error: {message}")
     if texts:
@@ -112,6 +116,10 @@ def delegate(args):
     stat = git("diff", "--stat")
     if stat:
         print("--- git diff --stat\n" + stat)
+    # git diff leaves out new files; list them so the review covers them.
+    new_files = git("ls-files", "--others", "--exclude-standard")
+    if new_files:
+        print("--- new files (not in git diff)\n" + new_files)
     return 0 if rc == 0 and not errors else 1
 
 

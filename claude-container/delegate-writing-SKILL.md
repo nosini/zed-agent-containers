@@ -47,10 +47,11 @@ not to.
    instructions and the container notes, not this conversation.
 4. **Run it** from the worktree, in the background for anything sizeable:
    `cd <worktree> && opencode-delegate ~/<repo>/tmp/opencode-delegate/<name>.md`.
-   It prints the session ID, the worker's short report, cost and the git
-   summary; the full transcript is in the log it names. Read the log only
-   when something's unclear.
-5. **Review** the diff (`git -C <worktree> diff`) like a pull request from
+   It prints the session ID, the worker's short report, token usage and
+   the git summary; the full transcript is in the log it names. Read the
+   log only when something's unclear.
+5. **Review** the diff (`git -C <worktree> diff`, plus the new files the
+   wrapper lists, which `git diff` leaves out) like a pull request from
    a junior contributor: correctness, scope creep, style, tests. Run the
    checks yourself; don't trust the report's test results.
 6. **Iterate cheaply.** Real problems spread over several places: write a

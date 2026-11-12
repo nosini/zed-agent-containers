@@ -137,8 +137,8 @@ You can also ask for delegation, or tell Claude not to, in any thread.
 `opencode-delegate` (`opencode-delegate.py`) runs `opencode run` headless in
 the current directory with every tool allowed, writes the full transcript
 to `~/PROJECT/tmp/opencode-delegate/`, and prints only the session ID, the
-worker's short report, cost and the git summary. It accepts only
-`opencode-go/` models (`-m`, or `OPENCODE_DELEGATE_MODEL`). The worker
+worker's short report, token usage, the git summary and any new files. It
+accepts only `opencode-go/` models (`-m`, or `OPENCODE_DELEGATE_MODEL`). The worker
 runs in the same container as Claude, with the same access. Its
 OpenCode config, `/etc/opencode/opencode.json` (from `opencode.json` here),
 loads no MCP servers and gives it the container notes (`CLAUDE.md`) and
