@@ -21,6 +21,9 @@ tests and limitations.
   with the binary for your platform; scripts are disabled, so the build
   links the locked `@opencode/cli-linux-x64` binary in its place and removes
   the other Linux variants. The image is amd64-only, like the others.
+  The Claude image installs OpenCode from this same lock (build context
+  `opencode-cli`) to hand writing to OpenCode Go; see
+  `../claude-container/README.md`.
 - `opencode-acp` runs `opencode acp`, OpenCode's own ACP server. It starts a
   private `opencode serve --stdio` child, not the shared background service
   the interactive CLI uses.

@@ -43,6 +43,7 @@ if [ "$build" = 1 ]; then
         echo "== Building localhost/$agent-agent:local"
         (cd "$src/$agent-container" && $podman build \
             --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+            --build-context opencode-cli="$src/opencode-container" \
             -t "localhost/$agent-agent:local" .)
     done
 fi

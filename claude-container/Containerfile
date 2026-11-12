@@ -48,6 +48,19 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
  && npm cache clean --force
 
+# OpenCode, for handing writing to OpenCode Go (opencode-delegate, below).
+# The same locked package and binary link as ../opencode-container (build
+# with --build-context opencode-cli=../opencode-container), so one pin
+# covers both images.
+WORKDIR /opt/opencode
+COPY --from=opencode-cli package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && npm cache clean --force \
+ && ln -f node_modules/@opencode/cli-linux-x64/bin/opencode node_modules/@opencode/cli/bin/opencode.exe \
+ && rm -rf node_modules/@opencode/cli-linux-x64-* \
+ && ln -s /opt/opencode/node_modules/.bin/opencode /usr/local/bin/opencode \
+ && opencode --version
+
 # Pinned adapters first, then toolchains the agents install into their home.
 ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/bin:/home/node/.local/go/bin:/home/node/go/bin:${PATH}" \
     NPM_CONFIG_PREFIX=/home/node/.local \
@@ -58,6 +71,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     UNIVER_RENDER_BROWSER=/usr/bin/chromium \
     MCP_TIMEOUT=600000 \
     DISABLE_AUTOUPDATER=1 \
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
     DISABLE_TELEMETRY=1 \
     NO_BROWSER=1 \
     GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
@@ -72,6 +86,13 @@ RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
 # pinned to. In the image, not the state volume, so rebuilds update it.
 # Claude Code reads managed skills from /etc/claude-code/.claude/skills.
 COPY --from=univer-cli SKILL.md /etc/claude-code/.claude/skills/univer-workspace-cli/SKILL.md
+# Delegating writing to OpenCode Go: the wrapper, its Skill, and OpenCode's
+# machine-wide config (no MCP servers; worker instructions) for the worker.
+COPY delegate-writing-SKILL.md /etc/claude-code/.claude/skills/delegate-writing/SKILL.md
+COPY opencode-delegate.py /usr/local/bin/opencode-delegate
+COPY opencode.json /etc/opencode/opencode.json
+COPY opencode-delegate.md /etc/opencode/delegate.md
+RUN chmod 755 /usr/local/bin/opencode-delegate
 RUN mkdir -p /home/node/.claude /workspace \
  && chown node:node /home/node/.claude
 COPY settings.json /home/node/.claude/settings.json

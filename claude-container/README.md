@@ -34,6 +34,10 @@ ACP policy, tests and limitations.
   in `/opt/univer-workspace-cli`, with its Skill in
   `/etc/claude-code/.claude/skills`. Its login is kept in this agent's state
   volume (`UNIVER_HOME`).
+- OpenCode, from the same lock as `../opencode-container`, with the
+  `opencode-delegate` wrapper and the `delegate-writing` Skill: Claude can
+  hand writing to a cheaper model on OpenCode Go and review the result. See
+  [Delegating writing to OpenCode Go](#delegating-writing-to-opencode-go).
 
 ## Build (host terminal)
 
@@ -41,6 +45,7 @@ ACP policy, tests and limitations.
 cd ~/Git/zed-agent-containers/claude-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
   build --build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
+  --build-context opencode-cli=../opencode-container \
   -t localhost/claude-agent:local .
 ```
 
@@ -112,3 +117,50 @@ $P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   claude-agent-acp --cli mcp add-json --scope user excel \
   '{"type":"stdio","command":"/opt/office-mcp/excel/bin/excel-mcp-server","args":["stdio"]}'
 ```
+
+## Delegating writing to OpenCode Go
+
+Claude can hand implementation work to a cheaper model on
+[OpenCode Go](https://opencode.ai/go) (default
+`opencode-go/deepseek-v4-pro`) and keep orchestrating and reviewing. The
+`delegate-writing` Skill (`delegate-writing-SKILL.md`, installed in
+`/etc/claude-code/.claude/skills`) tells Claude when to do this:
+
+- only when writing the spec and reviewing the diff costs it fewer tokens
+  than writing the change itself; small fixes it just makes itself;
+- in a git worktree, so the worker's changes stay separate from yours;
+- with Claude running the checks itself, fixing small issues directly and
+  sending larger ones back to the same OpenCode session.
+
+You can also ask for delegation, or tell Claude not to, in any thread.
+
+`opencode-delegate` (`opencode-delegate.py`) runs `opencode run` headless in
+the current directory with every tool allowed, writes the full transcript
+to `~/PROJECT/tmp/opencode-delegate/`, and prints only the session ID, the
+worker's short report, cost and the git summary. It accepts only
+`opencode-go/` models (`-m`, or `OPENCODE_DELEGATE_MODEL`). The worker
+runs in the same container as Claude, with the same access. Its
+OpenCode config, `/etc/opencode/opencode.json` (from `opencode.json` here),
+loads no MCP servers and gives it the container notes (`CLAUDE.md`) and
+`opencode-delegate.md`: stay in scope, don't commit, report briefly.
+OpenCode's per-user config in the shared home (`~/.config/opencode`) and the
+repository's `AGENTS.md` still apply.
+
+OpenCode's data (the Go login, sessions and logs) is kept in this agent's
+state volume, in `opencode-data`, not in `opencode-agent-state`, so Claude
+never sees your other OpenCode logins. Log in once per state volume, with
+the API key from your OpenCode Go dashboard. `claude` and `claude-teams`
+share `claude-agent-state`; `claude-b` uses `claude-b-agent-state`:
+
+```sh
+P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
+for volume in claude-agent-state claude-b-agent-state; do
+  $P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+    -v $volume:/home/node/.claude localhost/claude-agent:local opencode-delegate login
+done
+$P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local opencode-delegate models
+```
+
+`opencode-delegate status` lists the stored login. The OpenCode version
+moves with `../opencode-container` when `../update.sh` runs.

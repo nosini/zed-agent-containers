@@ -271,7 +271,8 @@ are faster:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
-C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli"
+C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
+  --build-context opencode-cli=../opencode-container"
 (cd ~/Git/zed-agent-containers/codex-container && $P build $C -t localhost/codex-agent:local .)
 (cd ~/Git/zed-agent-containers/claude-container && $P build $C -t localhost/claude-agent:local .)
 (cd ~/Git/zed-agent-containers/opencode-container && $P build $C -t localhost/opencode-agent:local .)

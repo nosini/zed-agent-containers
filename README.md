@@ -23,7 +23,7 @@ The host escape feature in Zed is not needed.
 |---|---|
 | `acp-connector/` | Host broker (ACP policy, per-project `podman run`), Zed-side client, systemd units, `install.sh`, tests. **Start here.** |
 | `codex-container/` | Codex image: `@openai/codex` + `codex-acp`, pinned |
-| `claude-container/` | Claude Code image: `claude-agent-acp` + native CLI, pinned |
+| `claude-container/` | Claude Code image: `claude-agent-acp` + native CLI, pinned; hands writing to OpenCode Go ([delegation](claude-container/README.md#delegating-writing-to-opencode-go)) |
 | `opencode-container/` | OpenCode image: `@opencode/cli` (its own ACP server), pinned; [provider logins](opencode-container/README.md#state-and-login) |
 | `office-mcp/` | Word and Excel MCP servers in all images: hash-pinned Python dependencies and `lock.py` |
 | `univer-cli/` | Univer Workspace CLI (`uvw`) in all images: pinned package, lockfile, its Skill; [login and use](univer-cli/README.md) |
@@ -41,7 +41,8 @@ the container READMEs). The steps it runs:
 
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
-C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli"
+C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
+  --build-context opencode-cli=../opencode-container"
 (cd codex-container && $P build $C -t localhost/codex-agent:local .)
 (cd claude-container && $P build $C -t localhost/claude-agent:local .)
 (cd opencode-container && $P build $C -t localhost/opencode-agent:local .)

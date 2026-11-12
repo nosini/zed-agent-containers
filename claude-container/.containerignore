@@ -4,3 +4,7 @@
 !package-lock.json
 !settings.json
 !claude.json
+!opencode.json
+!opencode-delegate.py
+!opencode-delegate.md
+!delegate-writing-SKILL.md

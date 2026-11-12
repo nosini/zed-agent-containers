@@ -212,6 +212,7 @@ if [ "$build" = 1 ]; then
     echo "== Building localhost/claude-agent:local"
     (cd "$src/claude-container" && $podman build \
         --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        --build-context opencode-cli="$src/opencode-container" \
         -t localhost/claude-agent:local .)
     step="building localhost/opencode-agent:local"
     echo "== Building localhost/opencode-agent:local"
