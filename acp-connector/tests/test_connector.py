@@ -331,7 +331,7 @@ class ThreadTitleTests(unittest.TestCase):
 
     def test_production_profiles_have_labels(self):
         self.assertEqual({k: v["label"] for k, v in self.broker.PROFILES.items()},
-                         {"codex": "Codex", "claude": "Claude", "opencode": "OpenCode",
+                         {"codex": "Codex", "claude": "Claude", "claude-b": "Claude (account B)", "opencode": "OpenCode",
                           "codex-teams": "Codex + Teams", "claude-teams": "Claude + Teams",
                           "opencode-teams": "OpenCode + Teams"})
 

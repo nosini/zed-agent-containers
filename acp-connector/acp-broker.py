@@ -61,6 +61,9 @@ PROFILES = {
                  "volume": "opencode-agent-state", "state": "/home/node/.local/share/opencode",
                  "instructions": "/home/node/.local/share/opencode/AGENTS.md"},
 }
+# Claude Code on a second Claude account: the same image with its own state
+# volume, so it has its own login, sessions and usage limits.
+PROFILES["claude-b"] = {**PROFILES["claude"], "label": "Claude (account B)", "volume": "claude-b-agent-state"}
 # The same agents with Teams for Linux's MCP bridge. Separate profiles with
 # their own sockets, so Teams access is chosen per Zed thread (by picking the
 # agent) while the host alone decides what that agent gets.

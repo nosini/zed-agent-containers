@@ -71,6 +71,8 @@ for agent in codex claude opencode; do
     done
     install -m 644 "$src/../$agent-container/$agent-agent-state.volume" "$quadlets/"
 done
+install -m 644 "$src/claude-b-acp-connector.socket" "$src/claude-b-acp-connector.service" "$units/"
+install -m 644 "$src/../claude-container/claude-b-agent-state.volume" "$quadlets/"
 install -m 644 "$src/agent-home.volume" "$quadlets/"
 
 # Environment notes the agents read (AGENTS.md / CLAUDE.md); yours to edit.
@@ -202,7 +204,7 @@ if [ -d "$HOME/Android/Sdk" ]; then add_opt --android-sdk "$HOME/Android/Sdk"; f
 echo "Broker options: $(cat "$settings/broker.env")"
 
 systemctl --user daemon-reload
-for profile in codex claude opencode codex-teams claude-teams opencode-teams; do
+for profile in codex claude claude-b opencode codex-teams claude-teams opencode-teams; do
     systemctl --user try-restart "$profile-acp-connector.service"
 done
 echo "Installed. If not done yet:"

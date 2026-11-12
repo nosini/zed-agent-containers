@@ -25,6 +25,7 @@ class InstallTest(unittest.TestCase):
         for name in ("install.sh", "agent-vm-client.py", "container-policy.py", "acp-broker.py", "acp-client.py",
                      "agent-environment.md", "agent-home.volume", "codex-acp-connector.socket",
                      "codex-acp-connector.service", "claude-acp-connector.socket", "claude-acp-connector.service",
+                     "claude-b-acp-connector.socket", "claude-b-acp-connector.service",
                      "codex-teams-acp-connector.socket", "codex-teams-acp-connector.service",
                      "claude-teams-acp-connector.socket", "claude-teams-acp-connector.service",
                      "opencode-acp-connector.socket", "opencode-acp-connector.service",
@@ -41,6 +42,7 @@ class InstallTest(unittest.TestCase):
             directory = self.repo / (profile + "-container")
             directory.mkdir()
             shutil.copy(SOURCE.parent / (profile + "-container") / (profile + "-agent-state.volume"), directory)
+        shutil.copy(SOURCE.parent / "claude-container/claude-b-agent-state.volume", self.repo / "claude-container")
 
         self.home = self.root / "home"
         self.settings = self.home / ".config/acp-connector"
@@ -87,9 +89,10 @@ class InstallTest(unittest.TestCase):
         self.assertNotEqual(self.installed.read_text(), "previous broker")
         self.assertTrue((self.installed.parent / "container-policy.py").is_file())
         self.assertIn("--vm-socket-dir " + str(self.vm), self.options.read_text())
-        self.assertEqual(self.events.read_text().splitlines()[-7:], ["--user daemon-reload",
+        self.assertEqual(self.events.read_text().splitlines()[-8:], ["--user daemon-reload",
                          "--user try-restart codex-acp-connector.service",
                          "--user try-restart claude-acp-connector.service",
+                         "--user try-restart claude-b-acp-connector.service",
                          "--user try-restart opencode-acp-connector.service",
                          "--user try-restart codex-teams-acp-connector.service",
                          "--user try-restart claude-teams-acp-connector.service",

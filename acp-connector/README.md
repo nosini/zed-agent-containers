@@ -300,6 +300,19 @@ $P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   claude-agent-acp --cli auth login --claudeai
 ```
 
+**Second Claude account (optional):** the `claude-b` profile ("Claude Code B
+(container)" in `zed-settings.jsonc`) runs the same image with its own state
+volume, `claude-b-agent-state`, so it has its own login, sessions and usage
+limits. The normal Claude entry and its threads are unchanged. Enable it with
+`systemctl --user enable --now claude-b-acp-connector.socket` and log in with
+the second account:
+
+```sh
+$P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v claude-b-agent-state:/home/node/.claude localhost/claude-agent:local \
+  claude-agent-acp --cli auth login --claudeai
+```
+
 OpenCode logins (ChatGPT, API keys) are in
 [`../opencode-container/README.md`](../opencode-container/README.md#state-and-login).
 
