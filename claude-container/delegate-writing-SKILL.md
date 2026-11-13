@@ -1,12 +1,12 @@
 ---
 name: delegate-writing
-description: Hand code or document writing to a cheaper model (DeepSeek on OpenCode Go) with opencode-delegate, then review the result. Use when an implementation task is big enough that writing a spec and reviewing the diff costs less than writing it yourself. Skip it for small fixes.
+description: Hand code or document writing to a cheaper model (DeepSeek V4.1 Flash on OpenCode Go) with opencode-delegate, then review the result. Use when an implementation task is big enough that writing a spec and reviewing the diff costs less than writing it yourself. Skip it for small fixes.
 ---
 
 # Delegating writing to OpenCode Go
 
 You orchestrate and review; `opencode-delegate` hands the writing to a
-cheaper model (default `opencode-go/deepseek-v4-pro`) running in this
+cheaper model (`opencode-go/deepseek-v4.1-flash`) running in this
 container. The user pays for your tokens at a much higher rate than the
 worker's, so the point is to spend fewer of yours.
 
@@ -66,8 +66,9 @@ not to.
 
 ## Models and login
 
-- `opencode-delegate models` lists the OpenCode Go models. Use
-  `-m opencode-go/deepseek-v4.1-flash` for simple, mechanical work. Only
+- Use `opencode-go/deepseek-v4.1-flash`, which `opencode-delegate` uses by
+  default; pass `-m opencode-go/deepseek-v4.1-flash` explicitly if needed.
+  `opencode-delegate models` lists the available OpenCode Go models. Only
   `opencode-go/` models are allowed.
 - If the run fails with an authentication or usage-limit error, tell the
   user. Logging in happens from a host terminal, as described in the

@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 
-DEFAULT_MODEL = "opencode-go/deepseek-v4-pro"
+DEFAULT_MODEL = "opencode-go/deepseek-v4.1-flash"
 PROVIDER = "opencode-go"
 REPORT_LIMIT = 6000
 # OpenCode's data directory (login, sessions) in this agent's state volume,

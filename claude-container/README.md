@@ -122,7 +122,7 @@ $P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
 
 Claude can hand implementation work to a cheaper model on
 [OpenCode Go](https://opencode.ai/go) (default
-`opencode-go/deepseek-v4-pro`) and keep orchestrating and reviewing. The
+`opencode-go/deepseek-v4.1-flash`) and keep orchestrating and reviewing. The
 `delegate-writing` Skill (`delegate-writing-SKILL.md`, installed in
 `/etc/claude-code/.claude/skills`) tells Claude when to do this:
 
