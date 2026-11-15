@@ -47,6 +47,19 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
  && npm cache clean --force
 
+# OpenCode, for handing writing to OpenCode Go (opencode-delegate, below).
+# The same locked package and binary link as ../opencode-container (build
+# with --build-context opencode-cli=../opencode-container), so one pin
+# covers all three agent images.
+WORKDIR /opt/opencode
+COPY --from=opencode-cli package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && npm cache clean --force \
+ && ln -f node_modules/@opencode/cli-linux-x64/bin/opencode node_modules/@opencode/cli/bin/opencode.exe \
+ && rm -rf node_modules/@opencode/cli-linux-x64-* \
+ && ln -s /opt/opencode/node_modules/.bin/opencode /usr/local/bin/opencode \
+ && opencode --version
+
 # Pinned adapters first, then toolchains the agents install into their home.
 ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/bin:/home/node/.local/go/bin:/home/node/go/bin:${PATH}" \
     NPM_CONFIG_PREFIX=/home/node/.local \
@@ -57,6 +70,7 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
     UNIVER_HOME=/home/node/.codex/univer-workspace \
     UNIVER_RENDER_BROWSER=/usr/bin/chromium \
     INITIAL_AGENT_MODE=agent-full-access \
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
     NO_BROWSER=1 \
     GIT_CONFIG_GLOBAL=/opt/agent-git/gitconfig
 
@@ -70,6 +84,14 @@ RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
 # pinned to. In the image, not the state volume, so rebuilds update it.
 # Codex reads system-wide skills from /etc/codex/skills.
 COPY --from=univer-cli SKILL.md /etc/codex/skills/univer-workspace-cli/SKILL.md
+# Share Claude's delegation wrapper, Skill and worker instructions (build
+# with --build-context delegation=../claude-container). Keep the OpenCode
+# config agent-specific so the worker reads Codex's container notes.
+COPY --from=delegation delegate-writing-SKILL.md /etc/codex/skills/delegate-writing/SKILL.md
+COPY --from=delegation opencode-delegate.py /usr/local/bin/opencode-delegate
+COPY --from=delegation opencode-delegate.md /etc/opencode/delegate.md
+COPY opencode.json /etc/opencode/opencode.json
+RUN chmod 755 /usr/local/bin/opencode-delegate
 RUN mkdir -p /home/node/.codex /workspace \
  && chown node:node /home/node/.codex
 COPY config.toml /home/node/.codex/config.toml

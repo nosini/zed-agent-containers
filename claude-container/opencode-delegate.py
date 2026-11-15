@@ -1,8 +1,8 @@
 #!/usr/bin/python3 -I
 """Hand a writing task to OpenCode (OpenCode Go) and summarize the result.
 
-Claude orchestrates and reviews; a cheaper model on OpenCode Go writes. Run
-in the directory the worker should change, normally a git worktree:
+The parent agent orchestrates and reviews; a cheaper model on OpenCode Go
+writes. Run in the directory the worker should change, normally a git worktree:
 
     opencode-delegate SPEC_FILE                 new session
     opencode-delegate -s SESSION SPEC_FILE      follow-up in the same session
@@ -24,8 +24,9 @@ DEFAULT_MODEL = "opencode-go/deepseek-v4.1-flash"
 PROVIDER = "opencode-go"
 REPORT_LIMIT = 6000
 # OpenCode's data directory (login, sessions) in this agent's state volume,
-# not in the shared home, so each Claude account keeps its own Go login.
-DATA_HOME = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", "/home/node/.claude"), "opencode-data")
+# not in the shared home, so Codex and each Claude account keep separate logins.
+STATE_HOME = os.environ.get("CODEX_HOME") or os.environ.get("CLAUDE_CONFIG_DIR", "/home/node/.claude")
+DATA_HOME = os.path.join(STATE_HOME, "opencode-data")
 
 
 def opencode_env():

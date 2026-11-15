@@ -31,6 +31,11 @@ limitations.
   in `/opt/univer-workspace-cli`, with its Skill in `/etc/codex/skills`. Its
   login is kept in this agent's state volume (`UNIVER_HOME`).
 
+- OpenCode from [`../opencode-container`](../opencode-container/README.md),
+  with `opencode-delegate` and the `delegate-writing` Skill for handing
+  larger writing tasks to DeepSeek on OpenCode Go. See
+  [Delegating writing to OpenCode Go](#delegating-writing-to-opencode-go).
+
 Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 
 ## Build (host terminal)
@@ -39,6 +44,7 @@ Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 cd ~/Git/zed-agent-containers/codex-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
   build --build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
+  --build-context opencode-cli=../opencode-container --build-context delegation=../claude-container \
   -t localhost/codex-agent:local .
 ```
 
@@ -90,3 +96,49 @@ $P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
   codex mcp add docx-mcp -- /opt/office-mcp/docx/bin/python3 -m docx_mcp.server &&
   codex mcp add excel -- /opt/office-mcp/excel/bin/excel-mcp-server stdio'
 ```
+
+## Delegating writing to OpenCode Go
+
+Codex can hand larger implementation tasks to DeepSeek on
+[OpenCode Go](https://opencode.ai/go), using
+`opencode-go/deepseek-v4.1-flash`, while Codex orchestrates and reviews.
+Small fixes stay with Codex. The `delegate-writing` Skill in
+`/etc/codex/skills` describes the workflow: write a short spec, run the
+worker in a separate worktree, review its diff and new files, and verify
+the checks. Delegation can also be requested or disabled in any thread.
+
+The wrapper, Skill and worker instructions share their source with
+`../claude-container`; the OpenCode version and lockfile come from
+`../opencode-container`. Rebuilding updates the Skill even for existing
+state volumes.
+
+`opencode-delegate SPEC_FILE` runs OpenCode headless in the current
+directory with all tools allowed. It prints a session ID, a short report,
+token usage and a git summary; the full transcript goes under
+`~/PROJECT/tmp/opencode-delegate/`. Continue a session with
+`opencode-delegate -s SESSION FOLLOWUP_FILE`. Only `opencode-go/` models
+are accepted (`-m`, or `OPENCODE_DELEGATE_MODEL`).
+
+The worker has the same container access as Codex. The image's
+`/etc/opencode/opencode.json` loads the container notes from
+`~/.codex/AGENTS.md` and the worker instructions from
+`/etc/opencode/delegate.md`, with no MCP servers configured. OpenCode's
+per-user configuration in `~/.config/opencode` and the repository's
+`AGENTS.md` also apply.
+
+The Go login and sessions are stored in `$CODEX_HOME/opencode-data`,
+inside `codex-agent-state`, separately from Claude and standalone
+OpenCode logins. The `codex` and `codex-teams` profiles share this state.
+After rebuilding, log in once from a host terminal with the API key
+from the OpenCode Go dashboard:
+
+```sh
+P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
+$P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v codex-agent-state:/home/node/.codex localhost/codex-agent:local opencode-delegate login
+$P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v codex-agent-state:/home/node/.codex localhost/codex-agent:local opencode-delegate models
+```
+
+`opencode-delegate status` lists the stored login. Restart the Codex
+agent after rebuilding to load the Skill and wrapper.

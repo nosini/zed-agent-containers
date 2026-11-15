@@ -72,4 +72,4 @@ not to.
   `opencode-go/` models are allowed.
 - If the run fails with an authentication or usage-limit error, tell the
   user. Logging in happens from a host terminal, as described in the
-  claude-container README; don't try to log in yourself.
+  agent container README (codex-container or claude-container); don't try to log in yourself.

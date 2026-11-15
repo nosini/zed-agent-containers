@@ -1,6 +1,6 @@
 # Working as a delegated writer
 
-Claude handed you this task and will review your changes before anything
+The parent agent handed you this task and will review your changes before anything
 is committed. You're the one doing the writing; it's doing the review.
 
 - Do what the task asks, in the directory you were started in. Don't widen
@@ -14,4 +14,4 @@ is committed. You're the one doing the writing; it's doing the review.
   questions instead of guessing.
 - Finish with a short report, at most about 15 lines: files changed, what
   you did, the checks you ran with their results, and anything left open.
-  Claude reads only this report and the diff, not your earlier messages.
+  The parent agent reads only this report and the diff, not your earlier messages.

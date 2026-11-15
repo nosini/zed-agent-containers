@@ -51,7 +51,7 @@ RUN npm ci --omit=dev --ignore-scripts \
 # OpenCode, for handing writing to OpenCode Go (opencode-delegate, below).
 # The same locked package and binary link as ../opencode-container (build
 # with --build-context opencode-cli=../opencode-container), so one pin
-# covers both images.
+# covers all three agent images.
 WORKDIR /opt/opencode
 COPY --from=opencode-cli package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
