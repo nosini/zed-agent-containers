@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "dependencies": {
     "@agentclientprotocol/codex-acp": "2.6.0",
-    "@openai/codex": "0.167.0"
+    "@openai/codex": "0.167.2"
   },
   "overrides": {
-    "@openai/codex": "0.167.0"
+    "@openai/codex": "0.167.2"
   }
 }
