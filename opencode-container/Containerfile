@@ -73,6 +73,12 @@ ENV PATH="/opt/agent/node_modules/.bin:/home/node/.local/bin:/home/node/.cargo/b
 RUN mkdir -p /opt/agent-git \
  && touch /opt/agent-git/gitconfig /opt/agent-git/ssh-agent.sock /opt/agent-git/known_hosts
 RUN mkdir -p /opt/agent-vm && touch /opt/agent-vm-client.py
+# REA's MCP server runs on the VM. This proxy (build with
+# --build-context rea-mcp=../rea-mcp) answers the MCP handshake from a saved
+# listing and connects over SSH only when a REA tool is used, so starting
+# an agent session doesn't boot the VM or keep it awake.
+COPY --from=rea-mcp rea-mcp.py rea-listing.json.gz /opt/rea-mcp/
+RUN chmod 755 /opt/rea-mcp/rea-mcp.py && ln -s /opt/rea-mcp/rea-mcp.py /usr/local/bin/rea-mcp
 # Machine-wide OpenCode configuration and the Workspace CLI's discovery Skill,
 # from the Univer release that uvw is pinned to. In the image, not the state
 # volume, so rebuilds update them. OpenCode reads both from /etc/opencode.

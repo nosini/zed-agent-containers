@@ -26,6 +26,7 @@ The host escape feature in Zed is not needed.
 | `claude-container/` | Claude Code image: `claude-agent-acp` + native CLI, pinned; hands writing to OpenCode Go ([delegation](claude-container/README.md#delegating-writing-to-opencode-go)) |
 | `opencode-container/` | OpenCode image: `@opencode/cli` (its own ACP server), pinned; [provider logins](opencode-container/README.md#state-and-login) |
 | `office-mcp/` | Word and Excel MCP servers in all images: hash-pinned Python dependencies and `lock.py` |
+| `rea-mcp/` | REA MCP proxy in all images: connects to REA on the VM only when a tool is used; [how it works](rea-mcp/README.md) |
 | `univer-cli/` | Univer Workspace CLI (`uvw`) in all images: pinned package, lockfile, its Skill; [login and use](univer-cli/README.md) |
 
 Quick start, from a host terminal:
@@ -42,7 +43,7 @@ the container READMEs). The steps it runs:
 ```sh
 P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
 C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
-  --build-context opencode-cli=../opencode-container --build-context delegation=../claude-container"
+  --build-context rea-mcp=../rea-mcp --build-context opencode-cli=../opencode-container --build-context delegation=../claude-container"
 (cd codex-container && $P build $C -t localhost/codex-agent:local .)
 (cd claude-container && $P build $C -t localhost/claude-agent:local .)
 (cd opencode-container && $P build $C -t localhost/opencode-agent:local .)

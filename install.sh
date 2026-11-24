@@ -42,7 +42,7 @@ if [ "$build" = 1 ]; then
     for agent in codex claude opencode; do
         echo "== Building localhost/$agent-agent:local"
         (cd "$src/$agent-container" && $podman build \
-            --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+            --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
             --build-context opencode-cli="$src/opencode-container" --build-context delegation="$src/claude-container" \
             -t "localhost/$agent-agent:local" .)
     done

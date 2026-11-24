@@ -45,7 +45,7 @@ ACP policy, tests and limitations.
 cd ~/Git/zed-agent-containers/claude-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
   build --build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
-  --build-context opencode-cli=../opencode-container \
+  --build-context rea-mcp=../rea-mcp --build-context opencode-cli=../opencode-container \
   -t localhost/claude-agent:local .
 ```
 
@@ -80,25 +80,32 @@ offers makes Zed run a command, and the connector blocks that.
 Claude Code applies project `.claude/settings.json` (including hooks) and
 `.mcp.json` from the open repo. They run inside the container.
 
-The image seeds `.claude.json` with a user-wide REA MCP server over SSH
-stdio. It runs `/usr/local/bin/rea mcp` on the VM, using the shared REA,
+The image seeds `.claude.json` with a user-wide REA MCP server. It runs
+`/usr/local/bin/rea-mcp` (see [`../rea-mcp`](../rea-mcp/README.md)), which
+starts `/usr/local/bin/rea mcp` on the VM over SSH only when a REA tool is
+used, so opening a thread doesn't start the VM. REA uses the shared REA,
 Ghidra and Java installation described in [the Codex README](../codex-container/README.md).
 The selected executable must be present on the VM, and the connector must
 mount the VM activation sockets. `MCP_TIMEOUT=600000` allows ten minutes
-for startup, including a VM cold boot; REA's tool timeout is twenty minutes.
+for startup; REA's tool timeout is twenty minutes, which also covers a VM
+cold boot on the first call.
 
-Rebuilding seeds new state volumes only. For an existing volume, merge the
-`mcpServers.rea` entry from `claude.json` into
-`/home/node/.claude/.claude.json`, preserving account and trust settings,
-then restart the Claude agent. You can register the entry from a host
-terminal after rebuilding:
+Rebuilding seeds new state volumes only. For an existing volume, replace
+the `mcpServers.rea` entry in `/home/node/.claude/.claude.json` with the one
+from `claude.json`, preserving account and trust settings, then restart the
+Claude agent. From a host terminal after rebuilding (`claude` and
+`claude-teams` share `claude-agent-state`; `claude-b` uses
+`claude-b-agent-state`):
 
 ```sh
-podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm \
-  --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
-  -v claude-agent-state:/home/node/.claude localhost/claude-agent:local \
-  claude-agent-acp --cli mcp add-json --scope user rea \
-  '{"type":"stdio","command":"ssh","args":["-T","-F","/home/node/.ssh/agent-vm.conf","agent-vm","/usr/local/bin/rea","mcp"],"timeout":1200000}'
+P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
+for volume in claude-agent-state claude-b-agent-state; do
+  $P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+    -v $volume:/home/node/.claude localhost/claude-agent:local sh -c '
+    claude-agent-acp --cli mcp remove --scope user rea;
+    claude-agent-acp --cli mcp add-json --scope user rea \
+      "{\"type\":\"stdio\",\"command\":\"/usr/local/bin/rea-mcp\",\"args\":[],\"timeout\":1200000}"'
+done
 ```
 
 The seeded `.claude.json` also registers the Word and Excel MCP servers,

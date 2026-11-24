@@ -44,7 +44,7 @@ Upstream adapter: https://github.com/agentclientprotocol/codex-acp
 cd ~/Git/zed-agent-containers/codex-container
 podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs \
   build --build-context office-mcp=../office-mcp --build-context univer-cli=../univer-cli \
-  --build-context opencode-cli=../opencode-container --build-context delegation=../claude-container \
+  --build-context rea-mcp=../rea-mcp --build-context opencode-cli=../opencode-container --build-context delegation=../claude-container \
   -t localhost/codex-agent:local .
 ```
 
@@ -72,17 +72,34 @@ podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs run --rm -it 
 the isolation. The container still can't write outside the open project
 and its state.
 
-The config also registers REA over SSH stdio through `/usr/local/bin/rea`
-on the VM. This launcher runs REA from `/usr/local/lib/rea` and sets
-`GHIDRA_INSTALL_DIR=/usr/local/share/ghidra` and
-`JAVA_HOME=/usr/lib64/jvm/java-21-openjdk`; SSH keeps stdout available for
-MCP messages. These shared installations are independent of project work
-directories. The selected executable must be present on the VM for REA to
-analyze it. The VM activation sockets must be mounted
-by the connector, and the Codex agent must be restarted to load the tools.
+The config also registers REA as the `rea` MCP server. REA runs on the VM
+through `/usr/local/bin/rea`, a launcher that runs REA from
+`/usr/local/lib/rea` and sets `GHIDRA_INSTALL_DIR=/usr/local/share/ghidra`
+and `JAVA_HOME=/usr/lib64/jvm/java-21-openjdk`. These shared installations
+are independent of project work directories. The selected executable must
+be present on the VM for REA to analyze it, and the connector must mount
+the VM activation sockets. The registered command is
+`/usr/local/bin/rea-mcp` (see [`../rea-mcp`](../rea-mcp/README.md)), which
+connects to the VM over SSH only when a REA tool is used, so opening a
+thread doesn't start the VM.
+
 Because the state volume is seeded only once, rebuilding the image does not
-update an existing volume's `config.toml`; merge the `[mcp_servers.rea]`
-entry from the image config into an existing volume when upgrading.
+update an existing volume's `config.toml`. To switch an existing volume's
+`[mcp_servers.rea]` entry to `rea-mcp` after rebuilding, keeping its
+timeouts, run this from a host terminal, then restart the Codex agent:
+
+```sh
+P="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
+$P run --rm --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
+  -v codex-agent-state:/home/node/.codex localhost/codex-agent:local python3 -I -c '
+import re
+path = "/home/node/.codex/config.toml"
+text = open(path).read()
+new = re.sub(r"(\[mcp_servers\.rea\]\n)command = \"ssh\"\nargs = \[[^]]*\]\n",
+             "\\1command = \"/usr/local/bin/rea-mcp\"\n", text)
+open(path, "w").write(new)
+print("updated" if new != text else "no SSH rea entry found")'
+```
 
 The config also registers the Word and Excel MCP servers, `docx-mcp` and
 `excel` (see [`../office-mcp`](../office-mcp/README.md)), which run inside

@@ -206,19 +206,19 @@ if [ "$build" = 1 ]; then
     step="building localhost/codex-agent:local"
     echo "== Building localhost/codex-agent:local"
     (cd "$src/codex-container" && $podman build --no-cache \
-        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
         --build-context opencode-cli="$src/opencode-container" --build-context delegation="$src/claude-container" \
         -t localhost/codex-agent:local .)
     step="building localhost/claude-agent:local"
     echo "== Building localhost/claude-agent:local"
     (cd "$src/claude-container" && $podman build \
-        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
         --build-context opencode-cli="$src/opencode-container" \
         -t localhost/claude-agent:local .)
     step="building localhost/opencode-agent:local"
     echo "== Building localhost/opencode-agent:local"
     (cd "$src/opencode-container" && $podman build \
-        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" \
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
         -t localhost/opencode-agent:local .)
     step="running the smoke tests"
     echo "== Smoke tests"
