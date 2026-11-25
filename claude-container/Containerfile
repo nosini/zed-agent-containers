@@ -1,5 +1,5 @@
 # Same official Node 22 bookworm-slim base as codex-container, pinned by digest.
-FROM docker.io/library/node:22-bookworm-slim@sha256:47725aca53d3295ec2d3be8f62726599b3033cc262edc2c7e429909b3ac599fc
+FROM docker.io/library/node:22-bookworm-slim@sha256:d20a7b8b4184bf74fe77499b5460a3d69e582bc733d50287e40c3fe791764851
 
 USER root
 # Keep this step identical in both agent images so the layer is shared.
