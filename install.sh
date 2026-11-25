@@ -39,7 +39,7 @@ src=$(cd "$(dirname "$0")" && pwd)
 podman="podman --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs"
 
 if [ "$build" = 1 ]; then
-    for agent in codex claude opencode; do
+    for agent in codex claude opencode antigravity; do
         echo "== Building localhost/$agent-agent:local"
         (cd "$src/$agent-container" && $podman build \
             --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
@@ -57,15 +57,16 @@ fi
 
 echo "== Enabling sockets"
 systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket \
-    opencode-acp-connector.socket
+    opencode-acp-connector.socket antigravity-acp-connector.socket
 
 if [ "$test" = 1 ]; then
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex
     "$src/acp-connector/tests/host-smoke-test.py" claude
     "$src/acp-connector/tests/host-smoke-test.py" opencode
+    "$src/acp-connector/tests/host-smoke-test.py" antigravity
     # The Teams profiles are optional: tested only where they're enabled.
-    for profile in codex-teams claude-teams opencode-teams; do
+    for profile in codex-teams claude-teams opencode-teams antigravity-teams; do
         if systemctl --user -q is-enabled "$profile-acp-connector.socket" 2>/dev/null; then
             "$src/acp-connector/tests/host-smoke-test.py" "$profile"
         fi
@@ -73,4 +74,4 @@ if [ "$test" = 1 ]; then
 fi
 
 echo "Done. First use of each agent: log in as described in codex-container/README.md,"
-echo "claude-container/README.md and opencode-container/README.md."
+echo "claude-container/README.md, opencode-container/README.md and antigravity-container/README.md."

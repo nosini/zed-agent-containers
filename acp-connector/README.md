@@ -1,8 +1,10 @@
 # Zed (Flatpak) ↔ per-project agent containers: ACP connector
 
-Codex (`../codex-container`), Claude Code (`../claude-container`) and
-OpenCode (`../opencode-container`, for other model providers) run in
-rootless Podman containers. When you open an agent thread on a project in
+Codex (`../codex-container`), Claude Code (`../claude-container`),
+OpenCode (`../opencode-container`, for other model providers) and
+Antigravity CLI (`../antigravity-container`, for a Google AI Pro or Ultra
+subscription) run
+in rootless Podman containers. When you open an agent thread on a project in
 Zed, that agent gets:
 
 | | Access |
@@ -23,9 +25,10 @@ Flatpak host escape.
 ```
 Zed Flatpak (cwd = project)          host (systemd --user)                       per connection
 acp-client.py                   ──►  $XDG_RUNTIME_DIR/app/dev.zed.Zed/       ──►  podman run --rm -i
- ACP_CONNECTOR=codex|claude|opencode  codex-acp.sock  → acp-broker --profile codex   ~/Git:rw, cwd=<project>,
+ ACP_CONNECTOR=codex|claude|…         codex-acp.sock  → acp-broker --profile codex   ~/Git:rw, cwd=<project>,
  (stdio ↔ socket, no policy)          claude-acp.sock → acp-broker --profile claude  agent-home, <agent>-agent-state
                                       opencode-acp.sock → … --profile opencode
+                                      antigravity-acp.sock → … --profile antigravity
 ```
 
 ## How the project is chosen
@@ -62,20 +65,20 @@ one container.
   hooks and config, which run the next time you use git there. The old
   `--writable` option is ignored (the broker logs a warning); remove it from
   `broker.env`.
-- **Teams:** extra agents, "Codex + Teams", "Claude + Teams" and
-  "OpenCode + Teams", give a thread Teams for Linux's MCP bridge; the
+- **Teams:** extra agents, "Codex + Teams", "Claude + Teams",
+  "OpenCode + Teams" and "Antigravity + Teams", give a thread Teams for Linux's MCP bridge; the
   normal agents never get it. Pick the agent in Zed per thread. Their own
-  brokers (`codex-teams`, `claude-teams`, `opencode-teams`) read `broker.env` like the others, plus
+  brokers (`codex-teams`, `claude-teams`, `opencode-teams`, `antigravity-teams`) read `broker.env` like the others, plus
   `~/.config/acp-connector/teams.env` with the socket Teams reports:
 
   ```sh
   printf 'ACP_TEAMS_OPTS="--teams-socket %s"\n' "$HOME/.var/app/eu.nosini.TeamsOffice/config/teams-for-linux/mcp/bridge.sock" \
     > ~/.config/acp-connector/teams.env
   systemctl --user enable --now codex-teams-acp-connector.socket claude-teams-acp-connector.socket \
-    opencode-teams-acp-connector.socket
+    opencode-teams-acp-connector.socket antigravity-teams-acp-connector.socket
   cd ~/Git/zed-agent-containers/acp-connector  # with Teams running:
   tests/host-smoke-test.py codex-teams && tests/host-smoke-test.py claude-teams &&
-    tests/host-smoke-test.py opencode-teams
+    tests/host-smoke-test.py opencode-teams && tests/host-smoke-test.py antigravity-teams
   ```
 
   Then add the Teams entries from `zed-settings.jsonc`. Only the Teams
@@ -99,7 +102,7 @@ one container.
     needs no restart. Claude Code starts a new relay on the next Teams tool
     call, so its open threads recover once Teams is back. Codex doesn't:
     its open thread keeps failing with "Transport closed", so start a new
-    Codex thread. How OpenCode recovers hasn't been tried yet. Teams
+    Codex thread. How OpenCode and Antigravity CLI recover hasn't been tried yet. Teams
     accepts four MCP connections at a time, so a fifth
     thread is cut off the same way.
   - **After changing `teams.env`,** restart the Teams brokers on the host
@@ -107,7 +110,7 @@ one container.
 
     ```sh
     systemctl --user try-restart codex-teams-acp-connector.service claude-teams-acp-connector.service \
-      opencode-teams-acp-connector.service
+      opencode-teams-acp-connector.service antigravity-teams-acp-connector.service
     ```
 - **Connection limit:** each agent's broker allows 16 concurrent connections
   by default. Open projects can keep connections alive even while their
@@ -119,7 +122,7 @@ one container.
 If the limit is reached, the broker refuses the new connection without
 starting a container. Close an unused project or raise the limit. The
 refusal and configured limit appear in
-`journalctl --user -u codex-acp-connector` (or `claude-`, `opencode-acp-connector`). An
+`journalctl --user -u codex-acp-connector` (or `claude-`, `opencode-`, `antigravity-acp-connector`). An
 unexpected broker disconnect exits the client with status 1 and a log hint;
 closing the editor's input normally exits with status 0.
 
@@ -152,8 +155,8 @@ The agents run commands inside their container.
   use their own `~/.gradle`, not yours, whose `gradle.properties` may hold
   credentials.
 - **Environment note:** `~/.config/acp-connector/agent-environment.md` is
-  mounted read-only as `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` and
-  `~/.local/share/opencode/AGENTS.md`, so
+  mounted read-only as `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`,
+  `~/.local/share/opencode/AGENTS.md` and `~/.gemini/GEMINI.md`, so
   the agents know all this and don't try `sudo apt`. Edit it as you like.
   `install.sh` replaces it with the repo version only while you haven't
   edited it, and otherwise tells you to compare the two.
@@ -259,7 +262,7 @@ Rewrites:
 - **`_meta`** is removed at every depth, in both directions. Every message
   is re-encoded from the parsed object.
 - **Logs** contain method names and decisions only:
-  `journalctl --user -u codex-acp-connector` (or `-u claude-…`, `-u opencode-…`).
+  `journalctl --user -u codex-acp-connector` (or `-u claude-…`, `-u opencode-…`, `-u antigravity-…`).
 
 These editor restrictions matter more now than before: Zed may have broad
 file access, and an agent must not be able to use it.
@@ -276,6 +279,7 @@ C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer
 (cd ~/Git/zed-agent-containers/codex-container && $P build $C -t localhost/codex-agent:local .)
 (cd ~/Git/zed-agent-containers/claude-container && $P build $C -t localhost/claude-agent:local .)
 (cd ~/Git/zed-agent-containers/opencode-container && $P build $C -t localhost/opencode-agent:local .)
+(cd ~/Git/zed-agent-containers/antigravity-container && $P build $C -t localhost/antigravity-agent:local .)
 ```
 
 Install. This also migrates the earlier long-lived containers; their state
@@ -285,8 +289,9 @@ volumes and logins are kept:
 cd ~/Git/zed-agent-containers/acp-connector
 ./install.sh            # check the gitconfig, broker.env and agent-environment.md it reports
 systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket \
-  opencode-acp-connector.socket
-tests/host-smoke-test.py codex && tests/host-smoke-test.py claude && tests/host-smoke-test.py opencode
+  opencode-acp-connector.socket antigravity-acp-connector.socket
+tests/host-smoke-test.py codex && tests/host-smoke-test.py claude && tests/host-smoke-test.py opencode &&
+  tests/host-smoke-test.py antigravity
 ```
 
 If you still need to log in, use a one-off container with the state volume
@@ -316,6 +321,9 @@ $P run --rm -it --userns=keep-id:uid=1000,gid=1000 --user=1000:1000 \
 
 OpenCode logins (ChatGPT, API keys) are in
 [`../opencode-container/README.md`](../opencode-container/README.md#state-and-login).
+The Antigravity CLI login (Google account) is in
+[`../antigravity-container/README.md`](../antigravity-container/README.md#state-and-login);
+Zed can't start it, so the broker offers Zed no login for that agent.
 
 Zed entries: see `zed-settings.jsonc` (already added to your settings).
 

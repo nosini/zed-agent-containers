@@ -1,9 +1,10 @@
 # zed-agent-containers
 
-Run Codex, Claude Code and OpenCode for Zed (Flatpak) in rootless Podman
-containers. OpenCode covers the other model providers: your ChatGPT
-subscription when Codex usage runs out, Mistral, OpenRouter, Gemini and
-other API keys, and local models.
+Run Codex, Claude Code, OpenCode and Antigravity CLI for Zed (Flatpak) in
+rootless Podman containers. Antigravity CLI, Google's coding agent, uses a
+Google account, including a Google AI Pro or Ultra subscription. OpenCode covers the other model
+providers: your ChatGPT subscription when Codex usage runs out, Mistral,
+OpenRouter, Gemini and other API keys, and local models.
 Each agent gets its own container for the project it's working on (Zed
 runs all of an agent's threads on a project over one connection, so they
 share that container):
@@ -25,6 +26,7 @@ The host escape feature in Zed is not needed.
 | `codex-container/` | Codex image: `@openai/codex` + `codex-acp`, pinned; hands writing to OpenCode Go ([delegation](codex-container/README.md#delegating-writing-to-opencode-go)) |
 | `claude-container/` | Claude Code image: `claude-agent-acp` + native CLI, pinned; hands writing to OpenCode Go ([delegation](claude-container/README.md#delegating-writing-to-opencode-go)) |
 | `opencode-container/` | OpenCode image: `@opencode/cli` (its own ACP server), pinned; [provider logins](opencode-container/README.md#state-and-login) |
+| `antigravity-container/` | Antigravity CLI image: `agy` (its own ACP server), pinned by SHA-512; [Google login](antigravity-container/README.md#state-and-login) |
 | `office-mcp/` | Word and Excel MCP servers in all images: hash-pinned Python dependencies and `lock.py` |
 | `rea-mcp/` | REA MCP proxy in all images: connects to REA on the VM only when a tool is used; [how it works](rea-mcp/README.md) |
 | `univer-cli/` | Univer Workspace CLI (`uvw`) in all images: pinned package, lockfile, its Skill; [login and use](univer-cli/README.md) |
@@ -47,10 +49,11 @@ C="--build-context office-mcp=../office-mcp --build-context univer-cli=../univer
 (cd codex-container && $P build $C -t localhost/codex-agent:local .)
 (cd claude-container && $P build $C -t localhost/claude-agent:local .)
 (cd opencode-container && $P build $C -t localhost/opencode-agent:local .)
+(cd antigravity-container && $P build $C -t localhost/antigravity-agent:local .)
 acp-connector/install.sh
 systemctl --user enable --now codex-acp-connector.socket claude-acp-connector.socket \
-  opencode-acp-connector.socket
-for agent in codex claude opencode; do acp-connector/tests/host-smoke-test.py $agent; done
+  opencode-acp-connector.socket antigravity-acp-connector.socket
+for agent in codex claude opencode antigravity; do acp-connector/tests/host-smoke-test.py $agent; done
 ```
 
 To update the agents, run `./update.sh` from a host terminal. It moves the

@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """Host smoke test for an installed connector:
-host-smoke-test.py codex|claude|opencode|codex-teams|claude-teams|opencode-teams [PROJECT]
+host-smoke-test.py codex|claude|opencode|antigravity|codex-teams|claude-teams|opencode-teams|antigravity-teams [PROJECT]
 
 Run from a HOST terminal after install.sh, rebuilding the images and enabling
 the <agent>-acp-connector.socket units. PROJECT defaults to this repository.
@@ -22,7 +22,9 @@ import time
 AGENTS = {"codex": ("@agentclientprotocol/codex-acp", "/home/node/.codex", "AGENTS.md", "/etc/codex/skills"),
           "claude": ("@agentclientprotocol/claude-agent-acp", "/home/node/.claude", "CLAUDE.md",
                      "/etc/claude-code/.claude/skills"),
-          "opencode": ("OpenCode", "/home/node/.local/share/opencode", "AGENTS.md", "/etc/opencode/skills")}
+          "opencode": ("OpenCode", "/home/node/.local/share/opencode", "AGENTS.md", "/etc/opencode/skills"),
+          "antigravity": ("Antigravity ACP Server", "/home/node/.gemini", "GEMINI.md",
+                          "/home/node/.gemini/config/skills")}
 AGENTS.update({f"{a}-teams": AGENTS[a] for a in list(AGENTS)})
 MCP_INIT = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
     "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "host-smoke-test", "version": "1"}}})

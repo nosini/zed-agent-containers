@@ -332,8 +332,8 @@ class ThreadTitleTests(unittest.TestCase):
     def test_production_profiles_have_labels(self):
         self.assertEqual({k: v["label"] for k, v in self.broker.PROFILES.items()},
                          {"codex": "Codex", "claude": "Claude", "claude-b": "Claude (account B)", "opencode": "OpenCode",
-                          "codex-teams": "Codex + Teams", "claude-teams": "Claude + Teams",
-                          "opencode-teams": "OpenCode + Teams"})
+                          "antigravity": "Antigravity", "codex-teams": "Codex + Teams", "claude-teams": "Claude + Teams",
+                          "opencode-teams": "OpenCode + Teams", "antigravity-teams": "Antigravity + Teams"})
 
 
 class TeamsPolicyTests(unittest.TestCase):
@@ -406,7 +406,66 @@ class TeamsPolicyTests(unittest.TestCase):
 
     def test_only_teams_profiles_are_marked(self):
         self.assertEqual({k for k, v in self.broker.PROFILES.items() if v.get("teams")},
-                         {"codex-teams", "claude-teams", "opencode-teams"})
+                         {"codex-teams", "claude-teams", "opencode-teams", "antigravity-teams"})
+
+
+class TerminalLoginTests(unittest.TestCase):
+    """Antigravity CLI logs in from a terminal only: Zed gets no login methods,
+    and the container keeps one hostname."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("broker", os.path.join(HERE, "..", "acp-broker.py"))
+        cls.broker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.broker)
+
+    def policy(self, profile):
+        p = self.broker.PROFILES[profile]
+        return self.broker.Policy("/g/p", "/g", "t", p["label"], (), p.get("terminal_login"))
+
+    def initialize(self, p):
+        p.client_pending[self.broker.id_key(1)] = "initialize"
+        to_client, _ = p.from_agent({"jsonrpc": "2.0", "id": 1, "result": {
+            "protocolVersion": 1, "authMethods": [{"id": "oauth-personal", "name": "Log in with Google"},
+                                                  {"id": "gemini-api-key", "name": "Gemini API key"}]}})
+        return to_client[0]["result"]["authMethods"]
+
+    def test_login_methods_and_authenticate_removed(self):
+        for profile in ("antigravity", "antigravity-teams"):
+            p = self.policy(profile)
+            self.assertEqual(self.initialize(p), [])
+            to_agent, to_client = p.from_client({"jsonrpc": "2.0", "id": 2, "method": "authenticate",
+                                                 "params": {"methodId": "oauth-personal"}})
+            self.assertEqual(to_agent, [])
+            self.assertEqual(to_client[0]["error"]["code"], -32602)
+            self.assertIn("antigravity-container/README.md", to_client[0]["error"]["message"])
+
+    def test_session_errors_say_how_to_log_in(self):
+        p = self.policy("antigravity")
+        to_agent, _ = p.from_client({"jsonrpc": "2.0", "id": 3, "method": "session/new",
+                                     "params": {"cwd": "/g/p", "mcpServers": []}})
+        self.assertEqual(len(to_agent), 1)
+        to_client, _ = p.from_agent({"jsonrpc": "2.0", "id": 3, "error": {
+            "code": -32000, "message": "Authentication required"}})
+        message = to_client[0]["error"]["message"]
+        self.assertTrue(message.startswith("Authentication required"))
+        self.assertIn("antigravity-container/README.md", message)
+        p.client_pending[self.broker.id_key(4)] = "session/prompt"
+        to_client, _ = p.from_agent({"jsonrpc": "2.0", "id": 4, "error": {"code": -32000, "message": "Quota"}})
+        self.assertEqual(to_client[0]["error"]["message"], "Quota")
+
+    def test_other_profiles_keep_agent_logins(self):
+        self.assertEqual([m["id"] for m in self.initialize(self.policy("opencode"))],
+                         ["oauth-personal", "gemini-api-key"])
+
+    def test_fixed_hostname_only_for_antigravity(self):
+        b = self.broker
+        for profile in ("antigravity", "antigravity-teams"):
+            argv = b.podman_argv(profile, "n", "/git", "/git/p")
+            self.assertIn("--hostname=antigravity-agent", argv)
+            self.assertEqual(argv[-2:], ["localhost/antigravity-agent:local", "antigravity-acp"])
+            self.assertIn("--mount=type=volume,src=antigravity-agent-state,dst=/home/node/.gemini", argv)
+        self.assertFalse([a for a in b.podman_argv("codex", "n", "/git", "/git/p") if a.startswith("--hostname")])
 
 
 class LifecycleTests(BrokerTest):

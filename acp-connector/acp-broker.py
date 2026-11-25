@@ -60,6 +60,15 @@ PROFILES = {
     "opencode": {"image": "localhost/opencode-agent:local", "entry": "opencode-acp", "label": "OpenCode",
                  "volume": "opencode-agent-state", "state": "/home/node/.local/share/opencode",
                  "instructions": "/home/node/.local/share/opencode/AGENTS.md"},
+    # Antigravity CLI keeps its login, settings and conversations in ~/.gemini.
+    # The hostname is fixed in case a saved login is tied to the machine.
+    # Its Google login over ACP needs a browser in the container, so Zed is
+    # offered no login: it is done once in a terminal.
+    "antigravity": {"image": "localhost/antigravity-agent:local", "entry": "antigravity-acp",
+                    "label": "Antigravity", "volume": "antigravity-agent-state", "state": "/home/node/.gemini",
+                    "instructions": "/home/node/.gemini/GEMINI.md", "hostname": "antigravity-agent",
+                    "terminal_login": "log in to Antigravity CLI once from a host terminal, as described in "
+                                      "antigravity-container/README.md, then start a new thread"},
 }
 # Claude Code on a second Claude account: the same image with its own state
 # volume, so it has its own login, sessions and usage limits.
@@ -67,7 +76,8 @@ PROFILES["claude-b"] = {**PROFILES["claude"], "label": "Claude (account B)", "vo
 # The same agents with Teams for Linux's MCP bridge. Separate profiles with
 # their own sockets, so Teams access is chosen per Zed thread (by picking the
 # agent) while the host alone decides what that agent gets.
-for _base, _label in (("codex", "Codex + Teams"), ("claude", "Claude + Teams"), ("opencode", "OpenCode + Teams")):
+for _base, _label in (("codex", "Codex + Teams"), ("claude", "Claude + Teams"), ("opencode", "OpenCode + Teams"),
+                      ("antigravity", "Antigravity + Teams")):
     PROFILES[f"{_base}-teams"] = {**PROFILES[_base], "label": _label, "teams": True}
 # Writable home shared by all agents: toolchains they install, build caches.
 HOME_VOLUME = "agent-home"
@@ -210,7 +220,7 @@ def pick_strings(obj, keys):
 class Policy:
     """Per-connection ACP filter. Returns messages to send in each direction."""
 
-    def __init__(self, project, git_root, tag, label=None, mcp_servers=()):
+    def __init__(self, project, git_root, tag, label=None, mcp_servers=(), terminal_login=None):
         self.project = project      # session cwd must be inside this
         self.git_root = git_root    # locations/diffs shown to Zed must be inside this
         self.tag = tag
@@ -219,6 +229,9 @@ class Policy:
         self.title_prefix = f"[{label}] " if label else ""
         # MCP servers the host gives every session, replacing Zed's.
         self.mcp_servers = json.dumps(list(mcp_servers))
+        # Set for agents that can only log in from a terminal: Zed is offered
+        # no login methods, and failed session requests say how to log in.
+        self.terminal_login = terminal_login
         self.client_pending = {}   # id key -> method, client requests awaiting the agent
         self.agent_pending = set()  # id keys of agent requests forwarded to Zed
 
@@ -287,6 +300,8 @@ class Policy:
                 out["clientInfo"] = info
             return out
         if method == "authenticate":
+            if self.terminal_login:
+                raise PolicyError(f"Not available in the editor: {self.terminal_login}")
             if not isinstance(params.get("methodId"), str):
                 raise PolicyError("methodId must be a string")
             return {"methodId": params["methodId"]}
@@ -322,6 +337,8 @@ class Policy:
             out = {"jsonrpc": "2.0", "id": msg["id"]}
             if "error" in msg:
                 out["error"] = self.clean_error(msg["error"])
+                if self.terminal_login and method in SESSION_OPENERS:
+                    out["error"]["message"] += f" (If not logged in yet: {self.terminal_login}.)"
             else:
                 out["result"] = self.agent_result(method, msg["result"])
             return [out], []
@@ -382,7 +399,9 @@ class Policy:
         for m in result.get("authMethods") or []:
             # Only agent-handled auth. "terminal" and "env_var" methods make Zed
             # run commands or restart the client with extra input.
-            if isinstance(m, dict) and isinstance(m.get("id"), str) and m.get("type", "agent") == "agent":
+            if self.terminal_login:
+                self.note(f"removed auth method {m.get('id') if isinstance(m, dict) else None!r} (terminal login)")
+            elif isinstance(m, dict) and isinstance(m.get("id"), str) and m.get("type", "agent") == "agent":
                 methods.append(pick_strings(m, ("id", "name", "description")))
             elif isinstance(m, dict):
                 self.note(f"removed auth method {m.get('id')!r}")
@@ -500,6 +519,7 @@ def podman_argv(profile, name, git_root, project, gitconfig=None, ssh_agent=None
     p = PROFILES[profile]
     argv = [*POLICY["run_argv"](interactive=True), "--detach-keys=", f"--name={name}",
             f"--label=acp-connector.profile={profile}",
+            *([f"--hostname={p['hostname']}"] if p.get("hostname") else []),
             f"--mount=type=volume,src={HOME_VOLUME},dst={HOME_DIR}",
             f"--mount=type=volume,src={p['volume']},dst={p['state']}",
             f"--mount=type=bind,src={git_root},dst={git_root}",
@@ -704,7 +724,7 @@ class Broker:
     async def session(self, reader, writer, tag, project):
         profile = PROFILES.get(self.name, {})
         policy = Policy(project, self.git_root, tag, profile.get("label"),
-                        [TEAMS_MCP_SERVER] if profile.get("teams") else ())
+                        [TEAMS_MCP_SERVER] if profile.get("teams") else (), profile.get("terminal_login"))
         try:
             argv, cleanup = self.launcher(project, f"{self.name}-agent-{os.getpid()}-{self.counter}")
         except LaunchRefused as exc:

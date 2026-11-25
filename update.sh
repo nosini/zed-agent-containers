@@ -108,6 +108,61 @@ chosen = max(ok + [pinned], key=key)
 print(chosen, latest, times[chosen])' "$1" "$cutoff" "$2"
 }
 
+# Antigravity CLI is no npm package. Google's update server lists the
+# releases with their build IDs, which give each one a fixed download URL;
+# the upload time of that file counts as its release date.
+AGY_SERVER=https://antigravity-cli-auto-updater-974169037036.us-central1.run.app
+AGY_BUCKET=https://storage.googleapis.com/antigravity-public/antigravity-cli
+
+# agy_pick <pinned>: prints "chosen latest published url", as pick.
+agy_pick() {
+    python3 -I -c 'import email.utils, json, sys, urllib.request
+server, bucket, cutoff, pinned = sys.argv[1:]
+with urllib.request.urlopen(server + "/releases", timeout=60) as r:
+    releases = json.load(r)
+def key(v):
+    return tuple(int(p) for p in v.split("."))
+def published(release):
+    url = "%s/%s-%s/linux-x64/cli_linux_x64.tar.gz" % (bucket, release["version"], release["execution_id"])
+    req = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            when = email.utils.parsedate_to_datetime(r.headers["Last-Modified"])
+    except OSError:
+        return None, url
+    return when.strftime("%Y-%m-%dT%H:%M:%S.000Z"), url
+releases = sorted((r for r in releases if all(p.isdigit() for p in r["version"].split("."))),
+                  key=lambda r: key(r["version"]), reverse=True)
+latest = releases[0]["version"]
+for release in releases:
+    if key(release["version"]) < key(pinned):
+        break
+    when, url = published(release)
+    if when and (when <= cutoff or release["version"] == pinned):
+        print(release["version"], latest, when, url)
+        sys.exit()
+sys.exit(f"no Antigravity CLI release found for {pinned} or newer")' "$AGY_SERVER" "$AGY_BUCKET" "$cutoff" "$1"
+}
+
+# agy_lock <version> <url>: downloads the release, checks it against the MD5
+# the bucket stores for it, and writes the pin with its SHA-512.
+agy_lock() {
+    python3 -I -c 'import base64, hashlib, sys, urllib.request
+version, url, path = sys.argv[1:]
+md5, sha512 = hashlib.md5(), hashlib.sha512()
+with urllib.request.urlopen(url, timeout=600) as r:
+    stored = dict(h.split("=", 1) for h in r.headers.get_all("x-goog-hash") or [])
+    while chunk := r.read(1 << 20):
+        md5.update(chunk)
+        sha512.update(chunk)
+if base64.b64encode(md5.digest()).decode() != stored.get("md5"):
+    sys.exit(f"{url}: MD5 does not match the one the bucket reports")
+with open(path, "w") as f:
+    f.write("# Antigravity CLI release pinned by ../update.sh: version, download and SHA-512.\n"
+            f"AGY_VERSION={version}\nAGY_URL={url}\nAGY_SHA512={sha512.hexdigest()}\n")' \
+        "$1" "$2" "$src/antigravity-container/agy-release.env"
+}
+
 codex_pick=$(pick @openai/codex "$(pinned codex-container @openai/codex)")
 codex_acp_pick=$(pick @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotocol/codex-acp)")
 claude_acp_pick=$(pick @agentclientprotocol/claude-agent-acp \
@@ -117,6 +172,9 @@ uvw_pick=$(pick univer-workspace-cli "$(pinned univer-cli univer-workspace-cli)"
 codex=${codex_pick%% *} codex_acp=${codex_acp_pick%% *} claude_acp=${claude_acp_pick%% *}
 opencode=${opencode_pick%% *}
 uvw=${uvw_pick%% *}
+agy_pinned=$(sed -n 's/^AGY_VERSION=//p' "$src/antigravity-container/agy-release.env")
+agy_pick=$(agy_pick "$agy_pinned")
+agy=${agy_pick%% *}
 docx_pick=$(pypi_pick docx-mcp-server "$(pypi_pinned docx.txt docx-mcp-server)")
 excel_pick=$(pypi_pick excel-mcp-server "$(pypi_pinned excel.txt excel-mcp-server)")
 docx=${docx_pick%% *} excel=${excel_pick%% *}
@@ -139,6 +197,7 @@ row @agentclientprotocol/codex-acp "$(pinned codex-container @agentclientprotoco
 row @agentclientprotocol/claude-agent-acp "$(pinned claude-container @agentclientprotocol/claude-agent-acp)" \
     "$claude_acp_pick"
 row @opencode/cli "$(pinned opencode-container @opencode/cli)" "$opencode_pick"
+row "Antigravity CLI" "$agy_pinned" "$agy_pick"
 row univer-workspace-cli "$(pinned univer-cli univer-workspace-cli)" "$uvw_pick"
 row "docx-mcp-server (PyPI)" "$(pypi_pinned docx.txt docx-mcp-server)" "$docx_pick"
 row "excel-mcp-server (PyPI)" "$(pypi_pinned excel.txt excel-mcp-server)" "$excel_pick"
@@ -163,6 +222,10 @@ npm_in "$src/codex-container" pkg set "dependencies.@openai/codex=$codex" \
     "overrides.@openai/codex=$codex" "dependencies.@agentclientprotocol/codex-acp=$codex_acp"
 npm_in "$src/claude-container" pkg set "dependencies.@agentclientprotocol/claude-agent-acp=$claude_acp"
 npm_in "$src/opencode-container" pkg set "dependencies.@opencode/cli=$opencode"
+if [ "$agy" != "$agy_pinned" ]; then
+    echo "Downloading Antigravity CLI $agy to record its SHA-512"
+    agy_lock "$agy" "${agy_pick##* }"
+fi
 npm_in "$src/univer-cli" pkg set "dependencies.univer-workspace-cli=$uvw"
 # The other dependencies resolve as of the cutoff too. npm refuses pins
 # newer than --before, so a pin kept from an earlier, newer choice moves
@@ -184,7 +247,7 @@ for lock_dir in codex-container claude-container opencode-container univer-cli; 
     npm_in "$src/$lock_dir" install --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
     npm_in "$src/$lock_dir" update --package-lock-only --ignore-scripts --no-audit --no-fund ${before:+--before=$before}
 done
-for image_dir in codex-container claude-container opencode-container; do
+for image_dir in codex-container claude-container opencode-container antigravity-container; do
     sed -i "s|^FROM $base@sha256:[0-9a-f]*|FROM $base@$digest|" "$src/$image_dir/Containerfile"
 done
 # The MCP servers' dependencies, hash-pinned for the images' Python 3.11, by
@@ -220,21 +283,28 @@ if [ "$build" = 1 ]; then
     (cd "$src/opencode-container" && $podman build \
         --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
         -t localhost/opencode-agent:local .)
+    step="building localhost/antigravity-agent:local"
+    echo "== Building localhost/antigravity-agent:local"
+    (cd "$src/antigravity-container" && $podman build \
+        --build-context office-mcp="$src/office-mcp" --build-context univer-cli="$src/univer-cli" --build-context rea-mcp="$src/rea-mcp" \
+        -t localhost/antigravity-agent:local .)
     step="running the smoke tests"
     echo "== Smoke tests"
     "$src/acp-connector/tests/host-smoke-test.py" codex
     "$src/acp-connector/tests/host-smoke-test.py" claude
     "$src/acp-connector/tests/host-smoke-test.py" opencode
+    "$src/acp-connector/tests/host-smoke-test.py" antigravity
     # The Teams profiles are optional: tested only where they're enabled.
-    for profile in codex-teams claude-teams opencode-teams; do
+    for profile in codex-teams claude-teams opencode-teams antigravity-teams; do
         if systemctl --user -q is-enabled "$profile-acp-connector.socket" 2>/dev/null; then
             "$src/acp-connector/tests/host-smoke-test.py" "$profile"
         fi
     done
     echo "Images rebuilt. Open threads still run the old ones; to switch (ends open threads):"
     echo "  systemctl --user try-restart codex-acp-connector.service claude-acp-connector.service \\"
-    echo "    opencode-acp-connector.service codex-teams-acp-connector.service \\"
-    echo "    claude-teams-acp-connector.service opencode-teams-acp-connector.service"
+    echo "    opencode-acp-connector.service antigravity-acp-connector.service \\"
+    echo "    codex-teams-acp-connector.service claude-teams-acp-connector.service \\"
+    echo "    opencode-teams-acp-connector.service antigravity-teams-acp-connector.service"
     echo "Old images: $podman image prune"
 fi
 echo "Review and commit: git -C $src diff"
